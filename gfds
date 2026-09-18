@@ -1,4 +1,5 @@
 
+
 local inputService   = game:GetService("UserInputService")
 local runService     = game:GetService("RunService")
 local tweenService   = game:GetService("TweenService")
@@ -69,6 +70,7 @@ end)
 
 local keyNames = {
     [Enum.KeyCode.LeftAlt] = 'LALT';
+    [Enum.KeyCode.RightAlt] = 'RALT';
     [Enum.KeyCode.RightAlt] = 'RALT';
     [Enum.KeyCode.LeftControl] = 'LCTRL';
     [Enum.KeyCode.RightControl] = 'RCTRL';
@@ -1193,7 +1195,7 @@ function library:addTab(name)
             holder.BackgroundTransparency = 1.000
             holder.BorderSizePixel = 0
             holder.Position = UDim2.new(0, 0, 0.00571428565, 0)
-            holder.Size = UDim2.new(1, 0, 0, 1, 0)
+            holder.Size = UDim2.new(1, 0, 1, 0)
             holder.BottomImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
             holder.CanvasSize = UDim2.new(0, 0, 0, 0)
             holder.ScrollBarThickness = 0
@@ -2761,7 +2763,7 @@ local function enableCarFly(notifyUser)
         library:notify("Sit in a VehicleSeat first!")
         warn("[CarFly] You must be sitting in a VehicleSeat.")
         -- keep menu toggle in sync (turn back off)
-        if carFlyToggleRef and library.options["carfly enabled"] then
+        if library.options["carfly enabled"] then
             library.options["carfly enabled"].changeState(false)
         end
         return
@@ -2770,7 +2772,6 @@ local function enableCarFly(notifyUser)
     flyVehicle = model
     flySeat = currentSeat
     carFlying = true
-    carFlySettings.enabled = true
     if notifyUser then
         library:notify("Car speedhack enabled")
     end
@@ -2785,7 +2786,7 @@ local function setCarFly(state)
     end
 end
 
--- V key toggles (works even when menu is closed; ignores key while typing in a menu textbox)
+-- V key toggles (works even when menu is closed)
 inputService.InputBegan:Connect(function(input, processed)
     if processed then
         return
@@ -2896,6 +2897,107 @@ runService.RenderStepped:Connect(function(dt)
             smoothRotation.Position
         )
     )
+end)
+
+--==================================================
+-- HIGH JUMP / INFINITE JUMP
+--==================================================
+
+local jumpSettings = {
+    highJumpEnabled = false,
+    jumpPower = 90,
+    infiniteJump = false
+}
+
+-- store defaults so disabling restores the character's original jump
+local storedUseJumpPower = nil
+local storedJumpPower = nil
+local storedJumpHeight = nil
+
+local function applyJumpToCharacter(character)
+    if not jumpSettings.highJumpEnabled then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        -- character might not be fully loaded yet
+        humanoid = character:WaitForChild("Humanoid", 5)
+        if not humanoid then return end
+    end
+
+    -- capture originals once (before we touch anything)
+    if storedUseJumpPower == nil then
+        storedUseJumpPower = humanoid.UseJumpPower
+        storedJumpPower = humanoid.JumpPower
+        storedJumpHeight = humanoid.JumpHeight
+    end
+
+    humanoid.UseJumpPower = true
+    humanoid.JumpPower = jumpSettings.jumpPower
+end
+
+local function restoreJump(character)
+    character = character or localPlayer.Character
+    if not character then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    if storedUseJumpPower ~= nil then
+        humanoid.UseJumpPower = storedUseJumpPower
+        humanoid.JumpPower = storedJumpPower
+        humanoid.JumpHeight = storedJumpHeight
+        storedUseJumpPower = nil
+        storedJumpPower = nil
+        storedJumpHeight = nil
+    end
+end
+
+local function setHighJump(state)
+    jumpSettings.highJumpEnabled = state
+    if state then
+        applyJumpToCharacter(localPlayer.Character)
+    else
+        restoreJump()
+    end
+end
+
+local function setJumpPower(value)
+    jumpSettings.jumpPower = value
+    if jumpSettings.highJumpEnabled then
+        local character = localPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.UseJumpPower = true
+                humanoid.JumpPower = value
+            end
+        end
+    end
+end
+
+-- re-apply on respawn / character change
+localPlayer.CharacterAdded:Connect(function(character)
+    if jumpSettings.highJumpEnabled then
+        task.wait(0.2) -- let the character finish loading
+        applyJumpToCharacter(character)
+    end
+end)
+
+-- infinite jump (fires on every jump request while enabled)
+inputService.JumpRequest:Connect(function()
+    if not jumpSettings.infiniteJump then
+        return
+    end
+
+    local character = localPlayer.Character
+    if not character then
+        return
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.Jump = true
+    end
 end)
 
 --==================================================
@@ -3210,7 +3312,7 @@ worldVisuals:addList({
 })
 
 --==================================================
--- MISC TAB (no gas car speedhack)
+-- MISC TAB (no gas car speedhack + high jump)
 --==================================================
 
 local carFlyGroup = miscTab:createGroup("right", "no gas car speedhack v to enable")
@@ -3258,6 +3360,36 @@ carFlyGroup:addSlider({
         carFlySettings.rotationSpeed = value
     end
 }, "")
+
+-- High Jump group
+local jumpGroup = miscTab:createGroup("right", "High Jump")
+
+jumpGroup:addToggle({
+    text = "High Jump",
+    flag = "highjump enabled",
+    callback = function(state)
+        setHighJump(state)
+    end
+})
+
+jumpGroup:addSlider({
+    text = "Jump Power",
+    flag = "highjump power",
+    min = 50,
+    max = 500,
+    value = 90,
+    callback = function(value)
+        setJumpPower(value)
+    end
+}, "")
+
+jumpGroup:addToggle({
+    text = "Infinite Jump",
+    flag = "infinite jump",
+    callback = function(state)
+        jumpSettings.infiniteJump = state
+    end
+})
 
 --==================================================
 -- RENDER LOOP
