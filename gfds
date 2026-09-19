@@ -2203,69 +2203,6 @@ Lighting:GetPropertyChangedSignal("ExposureCompensation"):Connect(function()
 end)
 
 --==================================================
--- CHAMS
---==================================================
-
-local chamsEnabled = false
-local chamsSettings = {
-    teamcheck = false,
-    fill = true,
-    fillColor = Color3.fromRGB(240, 142, 214),
-    outlineColor = Color3.fromRGB(255, 255, 255)
-}
-local chamsFolder = Instance.new("Folder")
-chamsFolder.Name = "OsirisChams"
-chamsFolder.Parent = game:GetService("CoreGui")
-
-local function getChamColor(plr)
-    if chamsSettings.teamcheck and plr.Team == localPlayer.Team then
-        return chamsSettings.outlineColor
-    end
-    return chamsSettings.fillColor
-end
-
-local function applyChams(plr)
-    if not chamsEnabled then return end
-    if plr == localPlayer then return end
-    if chamsFolder:FindFirstChild(plr.Name) then return end
-    local char = plr.Character
-    if not char then return end
-
-    local highlight = Instance.new("Highlight")
-    highlight.Name = plr.Name
-    highlight.FillColor = getChamColor(plr)
-    highlight.OutlineColor = chamsSettings.outlineColor
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Adornee = char
-    highlight.Parent = chamsFolder
-
-    if chamsSettings.teamcheck and plr.Team == localPlayer.Team then
-        highlight.FillTransparency = 1
-    else
-        highlight.FillTransparency = chamsSettings.fill and 0.5 or 1
-    end
-end
-
-local function updateChams()
-    for _,v in next, chamsFolder:GetChildren() do
-        local plr = players:FindFirstChild(v.Name)
-        if plr and plr.Character and v.Adornee ~= plr.Character then
-            v.Adornee = plr.Character
-        end
-    end
-end
-
-local function clearChams()
-    chamsFolder:ClearAllChildren()
-end
-
-if chamsSettings.teamcheck then
-    players.PlayerAdded:Connect(applyChams)
-end
-
---==================================================
 -- VEHICLE ESP
 --==================================================
 
@@ -3461,13 +3398,7 @@ espVisuals:addColorpicker({
     end
 })
 
-playerVisuals:addToggle({
-    text = "Bullet Tracer",
-    flag = "bullet tracer",
-    callback = function(state)
-        tracerConfig.enabled = state
-    end
-})
+
 
 playerVisuals:addSlider({
     text = "Tracer Thickness",
@@ -3502,47 +3433,36 @@ playerVisuals:addColorpicker({
     end
 })
 
+
 playerVisuals:addToggle({
-    text = "Chams",
-    flag = "chams",
+    text = "Bullet Tracer",
+    flag = "bullet tracer",
     callback = function(state)
-        chamsEnabled = state
-        if not state then
-            clearChams()
-            return
-        end
-        for _,plr in next, players:GetPlayers() do
-            applyChams(plr)
-        end
+        tracerConfig.enabled = state
     end
 })
 
-playerVisuals:addToggle({
-    text = "Chams Team Check",
-    flag = "chams teamcheck",
-    callback = function(state)
-        chamsSettings.teamcheck = state
-        if chamsEnabled then
-            clearChams()
-            for _,plr in next, players:GetPlayers() do
-                applyChams(plr)
-            end
-        end
+playerVisuals:addList({
+    text = "Tracer Type",
+    flag = "tracer type",
+    values = {"Laser", "Plasma", "Neon streak", "Energy beam", "Pulse beam", "Lightning"},
+    value = "Laser",
+    callback = function(value)
+        tracerConfig.type = value
     end
 })
 
-playerVisuals:addColorpicker({
-    text = "Chams Color",
-    ontop = true,
-    flag = "chams color",
-    color = Color3.fromRGB(240, 142, 214),
-    callback = function(color)
-        chamsSettings.fillColor = color
-        for _,v in next, chamsFolder:GetChildren() do
-            v.FillColor = color
-        end
-    end
-})
+local tracerConfig = {
+    enabled = false,
+    type = "Laser",   -- ← this line must exist, it's new
+    lifetime = 0.08,
+    widthStart = 0.08,
+    widthEnd = 0.02,
+    color = Color3.fromRGB(255, 45, 210)
+}
+
+local TRACER_TEXTURE = "rbxassetid://446111271" -- ← this too
+
 
 worldVisuals:addToggle({
     text = "Full Bright",
@@ -3811,9 +3731,6 @@ configsettings:addButton({text = "Load",callback = function() library:loadConfig
 configsettings:addButton({text = "Update",callback = function() library:saveConfig() end})
 configsettings:addButton({text = "Delete",callback = function() library:deleteConfig() end})
 configsettings:addButton({text = "Refresh",callback = function() library:refreshConfigs() end})
-configsettings:addButton({text = "Copy Game Invite"})
-configsettings:addButton({text = "Rejoin Server"})
-configsettings:addButton({text = "Server Hop"})
 
 uisettings:addToggle({text = "Show Game Name",flag = "show game name"})
 uisettings:addTextbox({text = "Menu Title",flag = "menutitle"})
@@ -3832,6 +3749,13 @@ othersettings:addToggle({
         end
     end
 })
+
+library.flags["show keybinds"] = true
+
+library:refreshConfigs()
+
+library:notify("loaded successfully - right shift to toggle menu")
+
 
 library.flags["show keybinds"] = true
 
