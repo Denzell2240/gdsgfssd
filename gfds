@@ -1330,7 +1330,7 @@ function library:addTab(name)
             local hue = Instance.new("ImageLabel")
             local pickerframe = Instance.new("Frame")
             local main_2 = Instance.new("Frame")
-            local picker = Instance.new("ImageLabel")
+            local picker = Instance.new("(" == nil and nil or "ImageLabel")
             local clr = Instance.new("Frame")
             local copy = Instance.new("TextButton")
 
@@ -2336,11 +2336,13 @@ task.spawn(function()
 end)
 
 --==================================================
--- BULLET TRACERS (Beam-based, GunMuzzlePoint/GunFirePoint)
+--==================================================
+-- BULLET TRACERS (Laser + Lightning only)
 --==================================================
 
 local tracerConfig = {
     enabled = false,
+    type = "Laser",
     lifetime = 0.08,
     widthStart = 0.08,
     widthEnd = 0.02,
@@ -2368,50 +2370,100 @@ local function findTracerOrigin()
     return nil
 end
 
+local function makePoint(position)
+    local p = Instance.new("Part")
+    p.Name = "_TracerPoint"
+    p.Size = Vector3.new(0.05, 0.05, 0.05)
+    p.Transparency = 1
+    p.Anchored = true
+    p.CanCollide = false
+    p.CanTouch = false
+    p.CanQuery = false
+    p.Position = position
+    p.Parent = workspace
+
+    local att = Instance.new("Attachment")
+    att.Parent = p
+    return p, att
+end
+
+local function makeSeg(a0, a1, w0, w1, color, parent)
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = a0
+    beam.Attachment1 = a1
+    beam.Width0 = w0
+    beam.Width1 = w1
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Color = ColorSequence.new(color)
+    beam.Transparency = NumberSequence.new(0)
+    beam.Parent = parent or a0.Parent
+    return beam
+end
+
 local function createTracer(originAttachment, targetPosition)
     if not originAttachment then
         return
     end
 
-    local endpoint = Instance.new("Part")
-    endpoint.Name = "_TracerEndpoint"
-    endpoint.Size = Vector3.new(0.05, 0.05, 0.05)
-    endpoint.Transparency = 1
-    endpoint.Anchored = true
-    endpoint.CanCollide = false
-    endpoint.CanTouch = false
-    endpoint.CanQuery = false
-    endpoint.Position = targetPosition
-    endpoint.Parent = workspace
+    local cfg = tracerConfig
+    local dir = targetPosition - originAttachment.WorldPosition
+    local dist = dir.Magnitude
+    if dist < 0.5 then return end
 
-    local endAttachment = Instance.new("Attachment")
-    endAttachment.Name = "_TracerEnd"
-    endAttachment.Parent = endpoint
+    local style = cfg.type or "Laser"
+    local color = cfg.color
+    local life = cfg.lifetime
 
-    local beam = Instance.new("Beam")
-    beam.Name = "_BulletTracer"
+    if style == "Laser" then
+        -- ============ LASER: ultra-thin, instant, fades fast ============
+        local p1, att1 = makePoint(targetPosition)
+        local beam = makeSeg(originAttachment, att1, cfg.widthStart * 0.4, cfg.widthEnd * 0.4, color)
+        debris:AddItem(beam, life * 0.6)
+        debris:AddItem(p1, life * 0.6)
 
-    beam.Attachment0 = originAttachment
-    beam.Attachment1 = endAttachment
+    elseif style == "Lightning" then
+        -- ============ LIGHTNING: straight bolt, electric flicker ============
+        local p1, att1 = makePoint(targetPosition)
 
-    beam.Width0 = tracerConfig.widthStart
-    beam.Width1 = tracerConfig.widthEnd
+        -- electric white-blue core, tinted by your tracer color
+        local boltColor = Color3.new(
+            math.min(1, color.R * 0.3 + 0.7),
+            math.min(1, color.G * 0.3 + 0.8),
+            1
+        )
 
-    beam.FaceCamera = true
-    beam.LightEmission = 1
-    beam.LightInfluence = 0
+        local core = makeSeg(originAttachment, att1, cfg.widthStart * 1.1, cfg.widthStart * 0.7, boltColor)
+        local glow = makeSeg(originAttachment, att1, cfg.widthStart * 3, cfg.widthStart * 1.6, color)
+        glow.Transparency = NumberSequence.new(0.6)
 
-    beam.Color = ColorSequence.new(tracerConfig.color)
+        debris:AddItem(core, life * 1.4)
+        debris:AddItem(glow, life * 1.4)
+        debris:AddItem(p1, life * 1.4)
 
-    beam.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0),
-        NumberSequenceKeypoint.new(1, 0)
-    })
+        -- rapid random flicker: brightness + opacity stutter like a real arc
+        task.spawn(function()
+            while core.Parent do
+                if math.random() > 0.25 then
+                    core.Transparency = NumberSequence.new(math.random() * 0.35)
+                    glow.Transparency = NumberSequence.new(0.45 + math.random() * 0.35)
+                    glow.Color = ColorSequence.new(color:Lerp(Color3.new(1,1,1), math.random() * 0.5))
+                else
+                    core.Transparency = NumberSequence.new(0.7) -- brief dropout moment
+                    glow.Transparency = NumberSequence.new(0.85)
+                end
+                runService.Heartbeat:Wait()
+            end
+        end)
 
-    beam.Parent = originAttachment.Parent
-
-    debris:AddItem(beam, tracerConfig.lifetime)
-    debris:AddItem(endpoint, tracerConfig.lifetime)
+    else
+        -- fallback: plain straight beam
+        local p1, att1 = makePoint(targetPosition)
+        local beam = makeSeg(originAttachment, att1, cfg.widthStart, cfg.widthEnd, color)
+        debris:AddItem(beam, life)
+        debris:AddItem(p1, life)
+    end
 end
 
 mouse.Button1Down:Connect(function()
@@ -3366,7 +3418,7 @@ espVisuals:addToggle({
 })
 
 espVisuals:addToggle({
-    text = "Vehicle Distance",
+    text = "Show Vehicle Distance",
     flag = "vehicle showdistance",
     callback = function(state)
         vehicleESPSettings.showdistance = state
@@ -3398,6 +3450,23 @@ espVisuals:addColorpicker({
     end
 })
 
+playerVisuals:addToggle({
+    text = "Bullet Tracer",
+    flag = "bullet tracer",
+    callback = function(state)
+        tracerConfig.enabled = state
+    end
+})
+
+playerVisuals:addList({
+    text = "Tracer Type",
+    flag = "tracer type",
+    values = {"Laser", "Lightning"},
+    value = "Laser",
+    callback = function(value)
+        tracerConfig.type = value
+    end
+})
 
 
 playerVisuals:addSlider({
@@ -3432,37 +3501,6 @@ playerVisuals:addColorpicker({
         tracerConfig.color = color
     end
 })
-
-
-playerVisuals:addToggle({
-    text = "Bullet Tracer",
-    flag = "bullet tracer",
-    callback = function(state)
-        tracerConfig.enabled = state
-    end
-})
-
-playerVisuals:addList({
-    text = "Tracer Type",
-    flag = "tracer type",
-    values = {"Laser", "Plasma", "Neon streak", "Energy beam", "Pulse beam", "Lightning"},
-    value = "Laser",
-    callback = function(value)
-        tracerConfig.type = value
-    end
-})
-
-local tracerConfig = {
-    enabled = false,
-    type = "Laser",   -- ← this line must exist, it's new
-    lifetime = 0.08,
-    widthStart = 0.08,
-    widthEnd = 0.02,
-    color = Color3.fromRGB(255, 45, 210)
-}
-
-local TRACER_TEXTURE = "rbxassetid://446111271" -- ← this too
-
 
 worldVisuals:addToggle({
     text = "Full Bright",
@@ -3530,20 +3568,6 @@ soundsGroup:addSlider({
         hitSoundSettings.volume = value / 10
     end
 }, "")
-
-soundsGroup:addSlider({
-    text = "Volume",
-    flag = "hitsounds volume",
-    min = 0,
-    max = 10,
-    value = 8,
-    callback = function(value)
-        -- slider is 0-10, mapped down to 0.0 - 1.0
-        hitSoundSettings.volume = value / 10
-    end
-}, "")
-
-
 
 local carFlyGroup = miscTab:createGroup("right", "no gas car speedhack v to enable")
 
@@ -3625,7 +3649,7 @@ local zoomToggle = zoomGroup:addToggle({
     callback = function(state)
         setZoomEnabled(state)
         if state then
-            library:notify("Hold T to zoom")
+            library:notify("Hold " .. (getZoomKey().Name or "T") .. " to zoom")
         end
     end
 })
@@ -3654,13 +3678,6 @@ runService.RenderStepped:Connect(function()
     local camera = workspace.CurrentCamera
     if not camera then
         return
-    end
-
-    if chamsEnabled then
-        for _,plr in next, players:GetPlayers() do
-            applyChams(plr)
-        end
-        updateChams()
     end
 
     if espSettings.enabled then
@@ -3749,13 +3766,6 @@ othersettings:addToggle({
         end
     end
 })
-
-library.flags["show keybinds"] = true
-
-library:refreshConfigs()
-
-library:notify("loaded successfully - right shift to toggle menu")
-
 
 library.flags["show keybinds"] = true
 
