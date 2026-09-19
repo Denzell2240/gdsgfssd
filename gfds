@@ -96,21 +96,23 @@ function library:Tween(...)
     tweenService:Create(...):Play()
 end
 
+-- ✅ FIXED: was checking an undefined global `playing`, so notifications could
+-- overlap and flicker. Now uses library.playing, and uses task.wait()
 function library:notify(text)
-    if playing then return end
-    playing = true
+    if library.playing then return end
+    library.playing = true
     library.notifyText.Text = text
     library.notifyText.Transparency = 0
     library.notifyText.Visible = true
-    for i = 0,1,0.1 do wait()
-        library.notifyText.Transparency = i
-    end
-    spawn(function()
-        wait(3)
-        for i = 1,0,-0.1 do wait()
+    task.spawn(function()
+        for i = 0,1,0.1 do task.wait()
             library.notifyText.Transparency = i
         end
-        playing = false
+        task.wait(3)
+        for i = 1,0,-0.1 do task.wait()
+            library.notifyText.Transparency = i
+        end
+        library.playing = false
         library.notifyText.Visible = false
     end)
 end
@@ -331,6 +333,7 @@ function library:addTab(name)
                 keybind.Size = UDim2.new(0, 51, 0, 10)
 
                 button.Parent = keybind
+                button.Name = "keybindbutton" -- ✅ tagged for Show Keybinds toggle
                 button.BackgroundColor3 = library.flags["menuaccent"] or Color3.fromRGB(187, 131, 255)
                 button.BackgroundTransparency = 1.000
                 button.BorderSizePixel = 0
@@ -342,6 +345,7 @@ function library:addTab(name)
                 button.TextSize = 13.000
                 button.TextStrokeTransparency = 0.000
                 button.TextXAlignment = Enum.TextXAlignment.Right
+                button.Visible = library.flags["show keybinds"] ~= false -- default visible
 
                 function updateValue(val)
                     if library.colorpicking then return end
@@ -1590,6 +1594,7 @@ function library:addTab(name)
             text.TextXAlignment = Enum.TextXAlignment.Left
 
             button.Parent = keybind
+            button.Name = "keybindbutton" -- ✅ tagged for Show Keybinds toggle
             button.BackgroundColor3 = Color3.fromRGB(187, 131, 255)
             button.BackgroundTransparency = 1.000
             button.BorderSizePixel = 0
@@ -1601,6 +1606,7 @@ function library:addTab(name)
             button.TextSize = 13.000
             button.TextStrokeTransparency = 0.000
             button.TextXAlignment = Enum.TextXAlignment.Right
+            button.Visible = library.flags["show keybinds"] ~= false -- default visible
 
             function updateValue(val)
                 if library.colorpicking then return end
@@ -1647,12 +1653,11 @@ function contains(list, x)
     return false
 end
 
-function library:createConfig()
-    local name = library.flags["config_name"]
-    if contains(library.options["selected_config"].values, name) then return library:notify(name..".cfg already exists!") end
-    if name == "" then return library:notify("Put a name goofy") end
+-- ✅ HARDENED: skips flags with no option entry instead of erroring
+function library:buildConfigTable()
     local jig = {}
     for i,v in next, library.flags do
+        if not library.options[i] then continue end
         if library.options[i].skipflag then continue end
         if typeof(v) == "Color3" then
             jig[i] = {v.R,v.G,v.B}
@@ -1662,62 +1667,89 @@ function library:createConfig()
             jig[i] = v
         end
     end
-    writefile("OsirisCFGS/"..name..".cfg",game:GetService("HttpService"):JSONEncode(jig))
+    return jig
+end
+
+function library:createConfig()
+    local name = library.flags["config_name"]
+    if contains(library.options["selected_config"].values, name) then return library:notify(name..".cfg already exists!") end
+    if name == "" then return library:notify("Put a name goofy") end
+    writefile("OsirisCFGS/"..name..".cfg",game:GetService("HttpService"):JSONEncode(library:buildConfigTable()))
     library:notify("Succesfully created config "..name..".cfg!")
     library:refreshConfigs()
 end
 
 function library:saveConfig()
     local name = library.flags["selected_config"]
-    local jig = {}
-    for i,v in next, library.flags do
-        if library.options[i].skipflag then continue end
-        if typeof(v) == "Color3" then
-            jig[i] = {v.R,v.G,v.B}
-        elseif typeof(v) == "EnumItem" then
-            jig[i] = {string.split(tostring(v),".")[2],string.split(tostring(v),".")[3]}
-        else
-            jig[i] = v
-        end
-    end
-    writefile("OsirisCFGS/"..name..".cfg",game:GetService("HttpService"):JSONEncode(jig))
+    writefile("OsirisCFGS/"..name..".cfg",game:GetService("HttpService"):JSONEncode(library:buildConfigTable()))
     library:notify("Succesfully updated config "..name..".cfg!")
     library:refreshConfigs()
 end
 
+-- ✅ FIXED REWRITE: skips missing options, restores multiselect lists
+-- (Excluded Players etc.) correctly, safer defaults, no errors
 function library:loadConfig()
     local name = library.flags["selected_config"]
     if not isfile("OsirisCFGS/"..name..".cfg") then
         library:notify("Config file not found!")
         return
     end
-    local config = game:GetService("HttpService"):JSONDecode(readfile("OsirisCFGS/"..name..".cfg"))
+    local ok, config = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(readfile("OsirisCFGS/"..name..".cfg"))
+    end)
+    if not ok or type(config) ~= "table" then
+        library:notify("Config file is corrupted!")
+        return
+    end
+
     for i,v in next, library.options do
-        spawn(function()pcall(function()
-            if config[i] then
-                if v.type == "colorpicker" then
-                    v.changeState(Color3.new(config[i][1],config[i][2],config[i][3]))
-                elseif v.type == "keybind" then
-                    v.changeState(Enum[config[i][1]][config[i][2]])
+        task.spawn(function()
+            pcall(function()
+                if config[i] ~= nil then
+                    if v.type == "colorpicker" and type(config[i]) == "table" then
+                        v.changeState(Color3.new(config[i][1],config[i][2],config[i][3]))
+                    elseif v.type == "keybind" and type(config[i]) == "table" then
+                        v.changeState(Enum[config[i][1]][config[i][2]])
+                    elseif v.type == "list" and v.oldargs.multiselect then
+                        -- multiselect lists are saved as arrays: restore the whole selection
+                        if type(config[i]) == "table" then
+                            local tbl = {}
+                            for _,val in ipairs(config[i]) do
+                                if table.find(v.values or {}, val) then
+                                    table.insert(tbl, val)
+                                end
+                            end
+                            v.changeState(tbl)
+                        else
+                            v.changeState({})
+                        end
+                    else
+                        if config[i] ~= library.flags[i] then
+                            v.changeState(config[i])
+                        end
+                    end
                 else
-                    if config[i] ~= library.flags[i] then
-                        v.changeState(config[i])
+                    -- no saved value -> reset to defaults
+                    if v.type == "toggle" then
+                        v.changeState(false)
+                    elseif v.type == "slider" then
+                        v.changeState(v.oldargs.value or 0)
+                    elseif v.type == "list" then
+                        if v.oldargs.multiselect then
+                            v.changeState({})
+                        else
+                            v.changeState(v.oldargs.value or (v.values and v.values[1]) or "")
+                        end
+                    elseif v.type == "textbox" or v.type == "cfg" then
+                        v.changeState(v.oldargs.value or v.oldargs.text or "")
+                    elseif v.type == "colorpicker" then
+                        v.changeState(v.oldargs.color or Color3.new(1,1,1))
+                    elseif v.type == "keybind" then
+                        v.changeState(v.oldargs.key or Enum.KeyCode.Unknown)
                     end
                 end
-            else
-                if v.type == "toggle" then
-                    v.changeState(false)
-                elseif v.type == "slider" then
-                    v.changeState(v.oldargs.value or 0)
-                elseif v.type == "textbox" or v.type == "list" or v.type == "cfg" then
-                    v.changeState(v.oldargs.value or v.oldargs.text or "")
-                    elseif v.type == "colorpicker" then
-                    v.changeState(v.oldargs.color or Color3.new(1,1,1))
-                elseif v.type == "keybind" then       -- ✅ fixed
-                    v.changeState(v.oldargs.key or Enum.KeyCode.Unknown)
-                end
-            end
-        end)end)
+            end)
+        end)
     end
     library:notify("Succesfully loaded config "..name..".cfg!")
 end
@@ -1987,7 +2019,7 @@ local function getAimbotTarget(camera)
     for _, plr in next, players:GetPlayers() do
         if plr == localPlayer then continue end
         if library.flags["aimbot team check"] and plr.Team ~= nil and plr.Team == localPlayer.Team then continue end
-        -- ✅ skip excluded players (never lock onto them)
+        -- skip excluded players (never lock onto them)
         if isExcluded(plr) then continue end
 
         local character = plr.Character
@@ -2950,7 +2982,7 @@ end
 
 -- the bound key is read LIVE from library.flags so rebinding in the menu works
 inputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
+    if processed then return end -- don't trigger while typing in a textbox
 
     local boundKey = library.flags["carfly key"]
     if typeof(boundKey) ~= "EnumItem" then return end
@@ -2961,7 +2993,6 @@ inputService.InputBegan:Connect(function(input, processed)
 end)
 
 -- reset on respawn
-
 localPlayer.CharacterAdded:Connect(function()
     disableCarFly(false)
 end)
@@ -3490,8 +3521,7 @@ carFlyToggleRef = carFlyToggle
 carFlyToggle:addKeybind({
     flag = "carfly key",
     key = Enum.KeyCode.V
-})
-
+}) -- note: no callback here on purpose; the InputBegan handler above does the toggling (prevents double-fire)
 
 carFlyGroup:addSlider({
     text = "Speed",
@@ -3644,7 +3674,21 @@ uisettings:addTextbox({text = "Domain",flag = "menudomain"})
 uisettings:addColorpicker({text = "Domain Accent",ontop = true,flag = "domainaccent",color = Color3.new(1,1,1)})
 uisettings:addColorpicker({text = "Menu Accent",ontop = true,flag = "menuaccent",color = Color3.new(1,1,1)})
 
-othersettings:addToggle({text = "Show Keybinds",flag = "show keybinds"})
+-- ✅ FIXED: Show Keybinds now actually hides/shows all keybind buttons
+othersettings:addToggle({
+    text = "Show Keybinds",
+    flag = "show keybinds",
+    callback = function(state)
+        for _,v in next, menu:GetDescendants() do
+            if v.Name == "keybindbutton" and v:IsA("TextButton") then
+                v.Visible = state
+            end
+        end
+    end
+})
+
+-- make sure the flag exists before Load is hit (keybind buttons check it at creation)
+library.flags["show keybinds"] = true
 
 -- initial config list refresh
 library:refreshConfigs()
