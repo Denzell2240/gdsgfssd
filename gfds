@@ -3532,6 +3532,268 @@ worldVisuals:addList({
 
 local soundsGroup = miscTab:createGroup("left", "Hit Sounds")
 
+--==================================================
+-- HIT NOTIFIER (headshot cards, top-right)
+--==================================================
+
+local hitNotifierSettings = {
+    enabled = false,
+    minDamage = 0,
+    lastNotify = 0
+}
+
+local hitNotifierGui = nil
+local hitNotifierHolder = nil
+local hitNotifierConnection = nil
+
+local function buildHitNotifierGui()
+    if hitNotifierGui then return end
+
+    local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+    hitNotifierGui = Instance.new("ScreenGui")
+    hitNotifierGui.Name = "ExternalHitNotifications"
+    hitNotifierGui.ResetOnSpawn = false
+    hitNotifierGui.Parent = playerGui
+
+    hitNotifierHolder = Instance.new("Frame")
+    hitNotifierHolder.Name = "Holder"
+    hitNotifierHolder.AnchorPoint = Vector2.new(1, 0)
+    hitNotifierHolder.Position = UDim2.new(1, -25, 0, 100)
+    hitNotifierHolder.Size = UDim2.new(0, 300, 0, 500)
+    hitNotifierHolder.BackgroundTransparency = 1
+    hitNotifierHolder.Parent = hitNotifierGui
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 8)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    layout.VerticalAlignment = Enum.VerticalAlignment.Top
+    layout.Parent = hitNotifierHolder
+end
+
+local function destroyHitNotifierGui()
+    if hitNotifierGui then
+        hitNotifierGui:Destroy()
+        hitNotifierGui = nil
+        hitNotifierHolder = nil
+    end
+end
+
+local function showHeadHit(damage)
+    if not hitNotifierHolder then return end
+
+    local notification = Instance.new("Frame")
+    notification.Size = UDim2.new(0, 280, 0, 78)
+    notification.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+    notification.BackgroundTransparency = 0.05
+    notification.BorderSizePixel = 0
+    notification.Parent = hitNotifierHolder
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 7)
+    corner.Parent = notification
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 55, 190)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.15
+    stroke.Parent = notification
+
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(0, 3, 1, 0)
+    accent.BackgroundColor3 = Color3.fromRGB(255, 55, 190)
+    accent.BorderSizePixel = 0
+    accent.Parent = notification
+
+    local accentCorner = Instance.new("UICorner")
+    accentCorner.CornerRadius = UDim.new(0, 3)
+    accentCorner.Parent = accent
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.new(0, 16, 0, 8)
+    title.Size = UDim2.new(1, -25, 0, 22)
+    title.Font = Enum.Font.GothamBold
+    title.Text = "HEADSHOT"
+    title.TextColor3 = Color3.fromRGB(255, 70, 195)
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = notification
+
+    local bone = Instance.new("TextLabel")
+    bone.BackgroundTransparency = 1
+    bone.Position = UDim2.new(0, 16, 0, 31)
+    bone.Size = UDim2.new(1, -25, 0, 18)
+    bone.Font = Enum.Font.GothamMedium
+    bone.Text = "BONE HIT  →  HEAD"
+    bone.TextColor3 = Color3.fromRGB(235, 235, 240)
+    bone.TextSize = 12
+    bone.TextXAlignment = Enum.TextXAlignment.Left
+    bone.Parent = notification
+
+    local damageLabel = Instance.new("TextLabel")
+    damageLabel.BackgroundTransparency = 1
+    damageLabel.Position = UDim2.new(0, 16, 0, 51)
+    damageLabel.Size = UDim2.new(1, -25, 0, 18)
+    damageLabel.Font = Enum.Font.Gotham
+    damageLabel.Text = "DAMAGE  " .. tostring(damage)
+    damageLabel.TextColor3 = Color3.fromRGB(160, 160, 170)
+    damageLabel.TextSize = 11
+    damageLabel.TextXAlignment = Enum.TextXAlignment.Left
+    damageLabel.Parent = notification
+
+    -- start off-screen + invisible
+    notification.Position = UDim2.new(1, 30, 0, 0)
+    notification.BackgroundTransparency = 1
+    stroke.Transparency = 1
+
+    for _, object in ipairs(notification:GetChildren()) do
+        if object:IsA("TextLabel") then
+            object.TextTransparency = 1
+        end
+    end
+
+    -- slide in
+    tweenService:Create(
+        notification,
+        TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        {Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 0.05}
+    ):Play()
+
+    tweenService:Create(
+        stroke,
+        TweenInfo.new(0.25),
+        {Transparency = 0.15}
+    ):Play()
+
+    for _, object in ipairs(notification:GetChildren()) do
+        if object:IsA("TextLabel") then
+            tweenService:Create(
+                object,
+                TweenInfo.new(0.2),
+                {TextTransparency = 0}
+            ):Play()
+        end
+    end
+
+    -- slide out + remove
+    task.delay(2.2, function()
+        if not notification.Parent then return end
+
+        local out = tweenService:Create(
+            notification,
+            TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            {Position = UDim2.new(1, 30, 0, 0), BackgroundTransparency = 1}
+        )
+        out:Play()
+
+        tweenService:Create(
+            stroke,
+            TweenInfo.new(0.2),
+            {Transparency = 1}
+        ):Play()
+
+        for _, object in ipairs(notification:GetChildren()) do
+            if object:IsA("TextLabel") then
+                tweenService:Create(
+                    object,
+                    TweenInfo.new(0.15),
+                    {TextTransparency = 1}
+                ):Play()
+            end
+        end
+
+        out.Completed:Wait()
+        notification:Destroy()
+    end)
+end
+
+local function startHitNotifier()
+    if hitNotifierConnection then return end
+
+    task.spawn(function()
+        local remotes = ReplicatedStorage:WaitForChild("CLIENT_REMOTES", 15)
+        if not remotes then warn("[HitNotifier] CLIENT_REMOTES not found") return end
+        local gunRemotes = remotes:WaitForChild("GUN_REMOTES", 15)
+        if not gunRemotes then warn("[HitNotifier] GUN_REMOTES not found") return end
+        local shotResult = gunRemotes:WaitForChild("ShotResultV8", 15)
+        if not shotResult then warn("[HitNotifier] ShotResultV8 not found") return end
+
+        buildHitNotifierGui()
+
+        hitNotifierConnection = shotResult.OnClientEvent:Connect(function(result)
+            if not hitNotifierSettings.enabled then return end
+            if type(result) ~= "table" then return end
+            if result.Fired ~= true then return end
+            if type(result.Pellets) ~= "table" then return end
+
+            -- throttle: max 1 card per 0.15s so shotgun pellets don't spam cards
+            if os.clock() - hitNotifierSettings.lastNotify < 0.15 then return end
+
+            for _, pellet in ipairs(result.Pellets) do
+                if type(pellet) ~= "table" then continue end
+                if type(pellet.Contacts) ~= "table" then continue end
+
+                for _, contact in ipairs(pellet.Contacts) do
+                    if type(contact) ~= "table" then continue end
+
+                    local damage = tonumber(contact.Damage)
+                    local zone = tostring(contact.Zone or "")
+
+                    if damage
+                        and damage > 0
+                        and damage >= hitNotifierSettings.minDamage
+                        and zone:lower() == "head" then
+
+                        hitNotifierSettings.lastNotify = os.clock()
+                        showHeadHit(math.floor(damage))
+                        break -- one card per shot, not per pellet
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+local function stopHitNotifier()
+    if hitNotifierConnection then
+        hitNotifierConnection:Disconnect()
+        hitNotifierConnection = nil
+    end
+    destroyHitNotifierGui()
+end
+
+--==================================================
+-- HIT NOTIFIER MENU (Misc tab)
+--==================================================
+
+local hitNotifierGroup = miscTab:createGroup("left", "Hit Notifier")
+
+hitNotifierGroup:addToggle({
+    text = "Hit Notifier",
+    flag = "hit notifier enabled",
+    callback = function(state)
+        hitNotifierSettings.enabled = state
+        if state then
+            startHitNotifier()
+        else
+            stopHitNotifier()
+        end
+    end
+})
+
+hitNotifierGroup:addSlider({
+    text = "Min Damage",
+    flag = "hit notifier mindamage",
+    min = 0,
+    max = 100,
+    value = 0,
+    callback = function(value)
+        hitNotifierSettings.minDamage = value
+    end
+}, "")
+
+
 soundsGroup:addToggle({
     text = "Headshot Sounds",
     flag = "hitsounds enabled",
