@@ -2919,22 +2919,49 @@ local function setCarFly(state)
     end
 end
 
--- V key toggles (works even when menu is closed)
-inputService.InputBegan:Connect(function(input, processed)
-    if processed then
-        return
-    end
+--------------------------------------------------
+-- V KEY HANDLER (single source of truth, no double-firing)
+--------------------------------------------------
 
-    if input.KeyCode == carFlySettings.toggleKey and library.flags["carfly enabled"] == true then
-        if carFlying then
-            disableCarFly(true)
-        else
-            enableCarFly(true)
+-- converts an InputObject into the same format the keybind flag stores
+local function getInputKey(input)
+    if input.KeyCode ~= Enum.KeyCode.Unknown then
+        return input.KeyCode
+    end
+    return input.UserInputType
+end
+
+-- toggles flying on/off and keeps the menu "Enabled" toggle in sync
+local function toggleCarFly(notifyUser)
+    if carFlying then
+        disableCarFly(notifyUser)
+        -- turn the menu toggle off to match
+        if library.options["carfly enabled"] then
+            library.options["carfly enabled"].changeState(false)
+        end
+    else
+        enableCarFly(notifyUser)
+        -- turn the menu toggle on to match (only if we actually started flying)
+        if carFlying and library.options["carfly enabled"] then
+            library.options["carfly enabled"].changeState(true)
         end
     end
+end
+
+-- the bound key is read LIVE from library.flags so rebinding in the menu works
+inputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    local boundKey = library.flags["carfly key"]
+    if typeof(boundKey) ~= "EnumItem" then return end
+    if boundKey == Enum.KeyCode.Unknown then return end -- nothing bound / waiting for input
+    if getInputKey(input) ~= boundKey then return end
+
+    toggleCarFly(true)
 end)
 
 -- reset on respawn
+
 localPlayer.CharacterAdded:Connect(function()
     disableCarFly(false)
 end)
@@ -3462,15 +3489,9 @@ carFlyToggleRef = carFlyToggle
 
 carFlyToggle:addKeybind({
     flag = "carfly key",
-    key = Enum.KeyCode.V,
-    callback = function()
-        if carFlying then
-            disableCarFly(true)
-        else
-            enableCarFly(true)
-        end
-    end
+    key = Enum.KeyCode.V
 })
+
 
 carFlyGroup:addSlider({
     text = "Speed",
