@@ -2557,6 +2557,7 @@ local espSettings = {
     healthbar = false,
     distancetext = false,
     tracers = false,
+    teamcheck = false,
     itemesp = false,
     itemdistance = 2000,
     maxdistance = 2000,
@@ -2632,7 +2633,9 @@ local function forceEspRefresh()
     lastEspRefresh = os.clock()
 end
 
-
+local function isAlly(plr)
+    return espSettings.teamcheck and plr.Team == localPlayer.Team
+end
 
 local function updateEspPlayer(plr, camera)
     if not espSettings.enabled or plr == localPlayer then return end
@@ -2763,7 +2766,10 @@ local function updateWeaponDisplay(player)
 
     if player == localPlayer then return end
 
-
+    if espSettings.teamcheck and player.Team == localPlayer.Team then
+        removeWeaponDisplay(player)
+        return
+    end
 
     local tool = nil
 
@@ -3312,6 +3318,19 @@ espVisuals:addToggle({
     end
 })
 
+espVisuals:addToggle({
+    text = "Team Check",
+    flag = "esp teamcheck",
+    callback = function(state)
+        espSettings.teamcheck = state
+        if espSettings.itemesp then
+            clearAllWeaponDisplays()
+            for _,plr in next, players:GetPlayers() do
+                updateWeaponDisplay(plr)
+            end
+        end
+    end
+})
 
 espVisuals:addToggle({
     text = "weapon ESP",
