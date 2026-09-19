@@ -1,5 +1,3 @@
-
-
 local inputService   = game:GetService("UserInputService")
 local runService     = game:GetService("RunService")
 local tweenService   = game:GetService("TweenService")
@@ -1755,13 +1753,74 @@ local miscTab = library:addTab("Misc")
 local configTab = library:addTab("Settings")
 
 --==================================================
--- AIMBOT
+-- AIMBOT (with player exclusion system)
 --==================================================
 
 local aimbotToggleState = false
 
 local aimbotGroup = aimbotTab:createGroup('left', 'Aimbot')
 local aimbotSettings = aimbotTab:createGroup('right', 'Aimbot Settings')
+
+--------------------------------------------------
+-- PLAYER EXCLUSION (green dot markers)
+--------------------------------------------------
+
+local EXCLUDED_DOT_NAME = "_AimbotExcludedDot"
+local refreshExcludedList -- forward-declared, defined further below
+
+-- is this player excluded from the aimbot?
+local function isExcluded(plr)
+    local selection = library.flags["aimbot excluded"]
+    if type(selection) ~= "table" then return false end
+    return table.find(selection, plr.Name) ~= nil
+end
+
+-- puts/removes the green dot marker above excluded players' heads
+local function updateExcludedDots()
+    for _, plr in ipairs(players:GetPlayers()) do
+        if plr == localPlayer then continue end
+
+        local head = plr.Character and plr.Character:FindFirstChild("Head")
+        if not head then continue end
+
+        local dot = head:FindFirstChild(EXCLUDED_DOT_NAME)
+
+        if isExcluded(plr) then
+            if not dot then
+                local billboard = Instance.new("BillboardGui")
+                billboard.Name = EXCLUDED_DOT_NAME
+                billboard.Adornee = head
+                billboard.Size = UDim2.fromOffset(14, 14)
+                billboard.StudsOffset = Vector3.new(0, 2.2, 0)
+                billboard.AlwaysOnTop = true
+                billboard.Parent = head
+
+                local circle = Instance.new("Frame")
+                circle.AnchorPoint = Vector2.new(0.5, 0.5)
+                circle.Position = UDim2.fromScale(0.5, 0.5)
+                circle.Size = UDim2.fromScale(0.8, 0.8)
+                circle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+                circle.BorderSizePixel = 0
+                circle.Parent = billboard
+
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(1, 0)
+                corner.Parent = circle
+
+                local stroke = Instance.new("UIStroke")
+                stroke.Color = Color3.fromRGB(0, 110, 0)
+                stroke.Thickness = 1.5
+                stroke.Parent = circle
+            end
+        elseif dot then
+            dot:Destroy()
+        end
+    end
+end
+
+--------------------------------------------------
+-- AIMBOT UI
+--------------------------------------------------
 
 local aimbotToggle = aimbotGroup:addToggle({
     text = "Aimbot",
@@ -1783,6 +1842,16 @@ aimbotGroup:addList({
     flag = "aimbot mode",
     values = {"Toggle", "Hold", "Always"},
     value = "Toggle"
+})
+
+aimbotGroup:addButton({
+    text = "Refresh Players",
+    callback = function()
+        if refreshExcludedList then
+            refreshExcludedList()
+            library:notify("Player list refreshed")
+        end
+    end
 })
 
 aimbotSettings:addSlider({
@@ -1828,6 +1897,66 @@ aimbotSettings:addToggle({
     flag = "aimbot auto fire"
 })
 
+-- multiselect dropdown: click player names to exclude them from the aimbot
+aimbotSettings:addList({
+    text = "Excluded Players",
+    flag = "aimbot excluded",
+    values = {},
+    multiselect = true
+})
+
+--------------------------------------------------
+-- PLAYER LIST REFRESH
+--------------------------------------------------
+
+-- rebuilds the excluded-players dropdown from the current server roster
+refreshExcludedList = function()
+    local opt = library.options["aimbot excluded"]
+    if not opt then return end
+
+    -- snapshot the current selection so a refresh doesn't wipe it
+    local prevSet = {}
+    local selection = library.flags["aimbot excluded"]
+    if type(selection) == "table" then
+        for _, v in ipairs(selection) do
+            prevSet[v] = true
+        end
+    end
+
+    -- build the fresh name list
+    local names = {}
+    for _, plr in ipairs(players:GetPlayers()) do
+        if plr ~= localPlayer then
+            table.insert(names, plr.Name)
+        end
+    end
+    table.sort(names)
+
+    opt.refresh(names)
+
+    -- the library's refresh auto-toggles the first entry on/off;
+    -- toggle it back so the selection stays exactly as the user left it
+    if names[1] then
+        opt.changeState(names[1])
+        if prevSet[names[1]] then
+            opt.changeState(names[1]) -- restore it if it WAS selected
+        end
+    end
+end
+
+-- keep the dropdown updated when the roster changes
+players.PlayerAdded:Connect(function(plr)
+    task.delay(1, function() refreshExcludedList() end)
+end)
+
+players.PlayerRemoving:Connect(function(plr)
+    task.delay(0.5, function() refreshExcludedList() end)
+end)
+
+task.defer(function()
+    refreshExcludedList()
+end)
+
 -- FOV circle (rendered by the aimbot loop)
 local aimCircle = Drawing.new("Circle")
 aimCircle.Thickness = 1
@@ -1849,7 +1978,6 @@ local function isAimKeyDown()
 end
 
 local function getAimbotTarget(camera)
-    -- GetMouseLocation returns viewport coords (no top inset), same space as WorldToViewportPoint
     local mouseLoc = inputService:GetMouseLocation()
     local mousePos = Vector2.new(mouseLoc.X, mouseLoc.Y)
     local radius = library.flags["aimbot fov"] or 150
@@ -1859,6 +1987,8 @@ local function getAimbotTarget(camera)
     for _, plr in next, players:GetPlayers() do
         if plr == localPlayer then continue end
         if library.flags["aimbot team check"] and plr.Team ~= nil and plr.Team == localPlayer.Team then continue end
+        -- ✅ skip excluded players (never lock onto them)
+        if isExcluded(plr) then continue end
 
         local character = plr.Character
         if not character then continue end
@@ -1895,7 +2025,10 @@ runService.RenderStepped:Connect(function()
     local camera = workspace.CurrentCamera
     if not camera then return end
 
-    -- FOV circle rendering (GetMouseLocation matches Drawing coordinates exactly)
+    -- green dot markers for excluded players (always visible, even when aimbot is off)
+    updateExcludedDots()
+
+    -- FOV circle rendering
     aimCircle.Visible = library.flags["aimbot fov circle"] == true and library.flags["aimbot"] == true
     if aimCircle.Visible then
         aimCircle.Radius = library.flags["aimbot fov"] or 150
@@ -2983,7 +3116,7 @@ localPlayer.CharacterAdded:Connect(function(character)
     end
 end)
 
--- infinite jump (fires on every jump request while enabled)
+-- infinite jumps (fires on every jump request while enabled)
 inputService.JumpRequest:Connect(function()
     if not jumpSettings.infiniteJump then
         return
