@@ -42,7 +42,6 @@ local function draggable(a)
             g(h)
         end
     end)
-    -- FIX: listen for mouse release globally so dragging never gets stuck
     b.InputEnded:Connect(function(h)
         if h.UserInputType == Enum.UserInputType.MouseButton1 or h.UserInputType == Enum.UserInputType.Touch then
             c = false
@@ -96,8 +95,6 @@ function library:Tween(...)
     tweenService:Create(...):Play()
 end
 
--- ✅ FIXED: was checking an undefined global `playing`, so notifications could
--- overlap and flicker. Now uses library.playing, and uses task.wait()
 function library:notify(text)
     if library.playing then return end
     library.playing = true
@@ -333,7 +330,7 @@ function library:addTab(name)
                 keybind.Size = UDim2.new(0, 51, 0, 10)
 
                 button.Parent = keybind
-                button.Name = "keybindbutton" -- ✅ tagged for Show Keybinds toggle
+                button.Name = "keybindbutton"
                 button.BackgroundColor3 = library.flags["menuaccent"] or Color3.fromRGB(187, 131, 255)
                 button.BackgroundTransparency = 1.000
                 button.BorderSizePixel = 0
@@ -345,7 +342,7 @@ function library:addTab(name)
                 button.TextSize = 13.000
                 button.TextStrokeTransparency = 0.000
                 button.TextXAlignment = Enum.TextXAlignment.Right
-                button.Visible = library.flags["show keybinds"] ~= false -- default visible
+                button.Visible = library.flags["show keybinds"] ~= false
 
                 function updateValue(val)
                     if library.colorpicking then return end
@@ -1296,7 +1293,6 @@ function library:addTab(name)
                     text.TextColor3 = Color3.fromRGB(255, 255, 255)
                     text.TextSize = 14.000
                     text.TextStrokeTransparency = 0.000
-
                     button.MouseButton1Click:Connect(function()
                         updateValue(v)
                     end)
@@ -1594,7 +1590,7 @@ function library:addTab(name)
             text.TextXAlignment = Enum.TextXAlignment.Left
 
             button.Parent = keybind
-            button.Name = "keybindbutton" -- ✅ tagged for Show Keybinds toggle
+            button.Name = "keybindbutton"
             button.BackgroundColor3 = Color3.fromRGB(187, 131, 255)
             button.BackgroundTransparency = 1.000
             button.BorderSizePixel = 0
@@ -1606,7 +1602,7 @@ function library:addTab(name)
             button.TextSize = 13.000
             button.TextStrokeTransparency = 0.000
             button.TextXAlignment = Enum.TextXAlignment.Right
-            button.Visible = library.flags["show keybinds"] ~= false -- default visible
+            button.Visible = library.flags["show keybinds"] ~= false
 
             function updateValue(val)
                 if library.colorpicking then return end
@@ -1653,7 +1649,6 @@ function contains(list, x)
     return false
 end
 
--- ✅ HARDENED: skips flags with no option entry instead of erroring
 function library:buildConfigTable()
     local jig = {}
     for i,v in next, library.flags do
@@ -1686,8 +1681,6 @@ function library:saveConfig()
     library:refreshConfigs()
 end
 
--- ✅ FIXED REWRITE: skips missing options, restores multiselect lists
--- (Excluded Players etc.) correctly, safer defaults, no errors
 function library:loadConfig()
     local name = library.flags["selected_config"]
     if not isfile("OsirisCFGS/"..name..".cfg") then
@@ -1711,7 +1704,6 @@ function library:loadConfig()
                     elseif v.type == "keybind" and type(config[i]) == "table" then
                         v.changeState(Enum[config[i][1]][config[i][2]])
                     elseif v.type == "list" and v.oldargs.multiselect then
-                        -- multiselect lists are saved as arrays: restore the whole selection
                         if type(config[i]) == "table" then
                             local tbl = {}
                             for _,val in ipairs(config[i]) do
@@ -1729,7 +1721,6 @@ function library:loadConfig()
                         end
                     end
                 else
-                    -- no saved value -> reset to defaults
                     if v.type == "toggle" then
                         v.changeState(false)
                     elseif v.type == "slider" then
@@ -1793,21 +1784,15 @@ local aimbotToggleState = false
 local aimbotGroup = aimbotTab:createGroup('left', 'Aimbot')
 local aimbotSettings = aimbotTab:createGroup('right', 'Aimbot Settings')
 
---------------------------------------------------
--- PLAYER EXCLUSION (green dot markers)
---------------------------------------------------
-
 local EXCLUDED_DOT_NAME = "_AimbotExcludedDot"
-local refreshExcludedList -- forward-declared, defined further below
+local refreshExcludedList
 
--- is this player excluded from the aimbot?
 local function isExcluded(plr)
     local selection = library.flags["aimbot excluded"]
     if type(selection) ~= "table" then return false end
     return table.find(selection, plr.Name) ~= nil
 end
 
--- puts/removes the green dot marker above excluded players' heads
 local function updateExcludedDots()
     for _, plr in ipairs(players:GetPlayers()) do
         if plr == localPlayer then continue end
@@ -1850,10 +1835,6 @@ local function updateExcludedDots()
     end
 end
 
---------------------------------------------------
--- AIMBOT UI
---------------------------------------------------
-
 local aimbotToggle = aimbotGroup:addToggle({
     text = "Aimbot",
     flag = "aimbot"
@@ -1861,7 +1842,7 @@ local aimbotToggle = aimbotGroup:addToggle({
 
 aimbotToggle:addKeybind({
     flag = "aimbot key",
-    key = Enum.UserInputType.MouseButton2, -- RMB by default
+    key = Enum.UserInputType.MouseButton2,
     callback = function()
         if library.flags["aimbot mode"] == "Toggle" then
             aimbotToggleState = not aimbotToggleState
@@ -1929,7 +1910,6 @@ aimbotSettings:addToggle({
     flag = "aimbot auto fire"
 })
 
--- multiselect dropdown: click player names to exclude them from the aimbot
 aimbotSettings:addList({
     text = "Excluded Players",
     flag = "aimbot excluded",
@@ -1937,16 +1917,10 @@ aimbotSettings:addList({
     multiselect = true
 })
 
---------------------------------------------------
--- PLAYER LIST REFRESH
---------------------------------------------------
-
--- rebuilds the excluded-players dropdown from the current server roster
 refreshExcludedList = function()
     local opt = library.options["aimbot excluded"]
     if not opt then return end
 
-    -- snapshot the current selection so a refresh doesn't wipe it
     local prevSet = {}
     local selection = library.flags["aimbot excluded"]
     if type(selection) == "table" then
@@ -1955,7 +1929,6 @@ refreshExcludedList = function()
         end
     end
 
-    -- build the fresh name list
     local names = {}
     for _, plr in ipairs(players:GetPlayers()) do
         if plr ~= localPlayer then
@@ -1966,17 +1939,14 @@ refreshExcludedList = function()
 
     opt.refresh(names)
 
-    -- the library's refresh auto-toggles the first entry on/off;
-    -- toggle it back so the selection stays exactly as the user left it
     if names[1] then
         opt.changeState(names[1])
         if prevSet[names[1]] then
-            opt.changeState(names[1]) -- restore it if it WAS selected
+            opt.changeState(names[1])
         end
     end
 end
 
--- keep the dropdown updated when the roster changes
 players.PlayerAdded:Connect(function(plr)
     task.delay(1, function() refreshExcludedList() end)
 end)
@@ -1989,7 +1959,6 @@ task.defer(function()
     refreshExcludedList()
 end)
 
--- FOV circle (rendered by the aimbot loop)
 local aimCircle = Drawing.new("Circle")
 aimCircle.Thickness = 1
 aimCircle.NumSides = 60
@@ -2006,7 +1975,7 @@ local function isAimKeyDown()
             return inputService:IsMouseButtonPressed(key)
         end
     end
-    return true -- no key bound, treat as held
+    return true
 end
 
 local function getAimbotTarget(camera)
@@ -2019,7 +1988,6 @@ local function getAimbotTarget(camera)
     for _, plr in next, players:GetPlayers() do
         if plr == localPlayer then continue end
         if library.flags["aimbot team check"] and plr.Team ~= nil and plr.Team == localPlayer.Team then continue end
-        -- skip excluded players (never lock onto them)
         if isExcluded(plr) then continue end
 
         local character = plr.Character
@@ -2057,10 +2025,8 @@ runService.RenderStepped:Connect(function()
     local camera = workspace.CurrentCamera
     if not camera then return end
 
-    -- green dot markers for excluded players (always visible, even when aimbot is off)
     updateExcludedDots()
 
-    -- FOV circle rendering
     aimCircle.Visible = library.flags["aimbot fov circle"] == true and library.flags["aimbot"] == true
     if aimCircle.Visible then
         aimCircle.Radius = library.flags["aimbot fov"] or 150
@@ -2089,7 +2055,6 @@ runService.RenderStepped:Connect(function()
     local goalCFrame = CFrame.new(camera.CFrame.Position, target.part.Position)
     camera.CFrame = camera.CFrame:Lerp(goalCFrame, math.clamp(1 / smoothness, 0.05, 1))
 
-    -- Auto Fire
     if library.flags["aimbot auto fire"] and not autoFireDebounce then
         local screenPos, onScreen = camera:WorldToViewportPoint(target.part.Position)
         local mouseLoc = inputService:GetMouseLocation()
@@ -2114,14 +2079,9 @@ if not Sky then
     warn("[Visuals] No Sky object was found under Lighting.")
 end
 
---==================================================
--- ADD YOUR SKIES HERE
---==================================================
-
 local skyboxes = {}
 
 if Sky then
-    -- keep the map's original sky so you can switch back to "Default"
     skyboxes["Default"] = {
         Bk = Sky.SkyboxBk,
         Dn = Sky.SkyboxDn,
@@ -2150,20 +2110,6 @@ skyboxes["Sky 2"] = {
     Up = "rbxassetid://149397702",
 }
 
--- Copy this section to add more
--- skyboxes["Sky 3"] = {
---     Bk = "rbxassetid://YOUR_ID_HERE",
---     Dn = "rbxassetid://YOUR_ID_HERE",
---     Ft = "rbxassetid://YOUR_ID_HERE",
---     Lf = "rbxassetid://YOUR_ID_HERE",
---     Rt = "rbxassetid://YOUR_ID_HERE",
---     Up = "rbxassetid://YOUR_ID_HERE",
--- }
-
---==================================================
--- CHANGE SKY
---==================================================
-
 local function setSkybox(skyName)
     if not Sky then return end
     local sky = skyboxes[skyName]
@@ -2189,7 +2135,6 @@ end
 
 local fullBrightEnabled = false
 
--- store the map's original lighting so we can restore it on disable
 local originalLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -2228,7 +2173,6 @@ local function setFullBright(state)
     end
 end
 
--- Reapply only when the important lighting properties change (game overrides it, we override back)
 Lighting:GetPropertyChangedSignal("Brightness"):Connect(function()
     if fullBrightEnabled then
         applyFullBright()
@@ -2299,7 +2243,7 @@ local function applyChams(plr)
     highlight.Parent = chamsFolder
 
     if chamsSettings.teamcheck and plr.Team == localPlayer.Team then
-        highlight.FillTransparency = 1 -- allies: outline only
+        highlight.FillTransparency = 1
     else
         highlight.FillTransparency = chamsSettings.fill and 0.5 or 1
     end
@@ -2329,11 +2273,11 @@ end
 local vehicleESPSettings = {
     enabled = false,
     outlineColor = Color3.fromRGB(255, 255, 255),
-    maxdistance = 2000, -- max distance a vehicle is shown (studs)
+    maxdistance = 2000,
     showdistance = true
 }
 
-local vehicleESP = {} -- [vehicleModel] = data
+local vehicleESP = {}
 local Cars = workspace:FindFirstChild("Cars")
 
 local function getVehiclePart(vehicle)
@@ -2433,7 +2377,6 @@ local function setVehicleESP(state)
     end
 end
 
--- wait (with timeout) for the Cars folder so the script never hangs
 task.spawn(function()
     Cars = Cars or workspace:WaitForChild("Cars", 10)
     if not Cars then warn("[Vehicle ESP] workspace.Cars not found after 10s") return end
@@ -2462,15 +2405,11 @@ end)
 
 local tracerConfig = {
     enabled = false,
-    lifetime = 0.08,               -- how long tracers last (seconds)
-    widthStart = 0.08,             -- beam start width (studs)
-    widthEnd = 0.02,              -- beam end width (studs)
+    lifetime = 0.08,
+    widthStart = 0.08,
+    widthEnd = 0.02,
     color = Color3.fromRGB(255, 45, 210)
 }
-
---------------------------------------------------
--- Find the weapon's actual muzzle attachment
---------------------------------------------------
 
 local function findTracerOrigin()
     local character = localPlayer.Character
@@ -2478,14 +2417,12 @@ local function findTracerOrigin()
         return nil
     end
 
-    -- Preferred muzzle
     local muzzle = character:FindFirstChild("GunMuzzlePoint", true)
 
     if muzzle and muzzle:IsA("Attachment") then
         return muzzle
     end
 
-    -- Fallback fire point
     local firePoint = character:FindFirstChild("GunFirePoint", true)
 
     if firePoint and firePoint:IsA("Attachment") then
@@ -2494,10 +2431,6 @@ local function findTracerOrigin()
 
     return nil
 end
-
---------------------------------------------------
--- Create visual tracer
---------------------------------------------------
 
 local function createTracer(originAttachment, targetPosition)
     if not originAttachment then
@@ -2545,10 +2478,6 @@ local function createTracer(originAttachment, targetPosition)
     debris:AddItem(endpoint, tracerConfig.lifetime)
 end
 
---------------------------------------------------
--- Fire visual tracer
---------------------------------------------------
-
 mouse.Button1Down:Connect(function()
     if not tracerConfig.enabled then return end
 
@@ -2561,7 +2490,76 @@ mouse.Button1Down:Connect(function()
 end)
 
 --==================================================
--- ESP SYSTEM (auto-refreshes every few seconds so it never gets stuck/glitched)
+-- HIT / HEADSHOT SOUND SYSTEM (ShotResultV8 remote)
+--==================================================
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+
+local hitSoundSettings = {
+    enabled = false,
+    volume = 0.8,
+    selected = "rust headshot sound"
+}
+
+-- ADD MORE SOUNDS HERE:
+-- sounds["sound name"] = "rbxassetid://XXXXXXXXXX"
+local sounds = {
+    ["rust headshot sound"] = "rbxassetid://5043539486",
+}
+
+local HIT_SOUND = "rbxassetid://5043539486"
+
+local function playSound(soundId)
+    local sound = Instance.new("Sound")
+    sound.SoundId = soundId
+    sound.Volume = hitSoundSettings.volume
+    sound.PlayOnRemove = false
+    sound.Parent = SoundService
+
+    sound:Play()
+
+    task.delay(3, function()
+        if sound and sound.Parent then
+            sound:Destroy()
+        end
+    end)
+end
+
+-- fetch the remote safely (never crashes or freezes the script if it's missing)
+task.spawn(function()
+    local remotes = ReplicatedStorage:WaitForChild("CLIENT_REMOTES", 15)
+    if not remotes then warn("[HitSounds] CLIENT_REMOTES not found") return end
+    local gunRemotes = remotes:WaitForChild("GUN_REMOTES", 15)
+    if not gunRemotes then warn("[HitSounds] GUN_REMOTES not found") return end
+    local shotResult = gunRemotes:WaitForChild("ShotResultV8", 15)
+    if not shotResult then warn("[HitSounds] ShotResultV8 not found") return end
+
+    shotResult.OnClientEvent:Connect(function(result)
+        if not hitSoundSettings.enabled then return end
+        if not result or not result.Pellets then
+            return
+        end
+
+        for _, pellet in ipairs(result.Pellets) do
+            for _, contact in ipairs(pellet.Contacts or {}) do
+                if contact.Reason == "Damage"
+                    and typeof(contact.Damage) == "number"
+                    and contact.Damage > 0 then
+
+                    if contact.Zone == "Head" then
+                        playSound(sounds[hitSoundSettings.selected] or HIT_SOUND)
+                    else
+                        playSound(HIT_SOUND)
+                    end
+                end
+            end
+        end
+    end)
+end)
+
+--==================================================
+-- ESP SYSTEM
 --==================================================
 
 local espSettings = {
@@ -2573,15 +2571,15 @@ local espSettings = {
     tracers = false,
     teamcheck = false,
     itemesp = false,
-    itemdistance = 2000, -- max distance for weapon esp text (studs)
+    itemdistance = 2000,
     maxdistance = 2000,
     boxcolor = Color3.fromRGB(240, 142, 214),
     namecolor = Color3.fromRGB(255, 255, 255),
     allycolor = Color3.fromRGB(0, 170, 255)
 }
 
-local espObjects = {} -- [player] = drawings
-local ESP_REFRESH_INTERVAL = 3 -- seconds between full ESP rebuilds
+local espObjects = {}
+local ESP_REFRESH_INTERVAL = 3
 local lastEspRefresh = os.clock()
 
 local function createEspDrawings()
@@ -2668,7 +2666,6 @@ local function updateEspPlayer(plr, camera)
         espObjects[plr] = obj
     end
 
-    -- bounding box
     local cf, size = char:GetBoundingBox()
     local topPos, topVis = camera:WorldToViewportPoint(cf.Position + Vector3.new(0, size.Y/2, 0))
     local bottomPos, botVis = camera:WorldToViewportPoint(cf.Position - Vector3.new(0, size.Y/2, 0))
@@ -2691,7 +2688,6 @@ local function updateEspPlayer(plr, camera)
 
     local color = isAlly(plr) and espSettings.allycolor or espSettings.boxcolor
 
-    -- box
     if espSettings.boxes then
         obj.box[1].From, obj.box[1].To = topLeft, topRight
         obj.box[2].From, obj.box[2].To = topRight, botRight
@@ -2705,7 +2701,6 @@ local function updateEspPlayer(plr, camera)
         for _,l in next, obj.box do l.Visible = false end
     end
 
-    -- health bar
     if espSettings.healthbar then
         local fraction = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
         local barTop = Vector2.new(topLeft.X - 4, topLeft.Y)
@@ -2722,7 +2717,6 @@ local function updateEspPlayer(plr, camera)
         obj.healthBar.Visible = false
     end
 
-    -- name
     if espSettings.names then
         obj.nameText.Text = plr.Name
         obj.nameText.Position = Vector2.new(topPos.X, topLeft.Y - 16)
@@ -2732,7 +2726,6 @@ local function updateEspPlayer(plr, camera)
         obj.nameText.Visible = false
     end
 
-    -- distance
     if espSettings.distancetext then
         obj.distanceText.Text = "["..math.floor(distance).."m]"
         obj.distanceText.Position = Vector2.new(topPos.X, bottomPos.Y + 2)
@@ -2742,7 +2735,6 @@ local function updateEspPlayer(plr, camera)
         obj.distanceText.Visible = false
     end
 
-    -- tracers
     if espSettings.tracers then
         local screen = camera.ViewportSize
         obj.tracer.From = Vector2.new(screen.X/2, screen.Y)
@@ -2759,7 +2751,7 @@ players.PlayerRemoving:Connect(function(plr)
 end)
 
 --==================================================
--- WEAPON ESP (held weapon display, fits alongside the main ESP)
+-- WEAPON ESP
 --==================================================
 
 local function removeWeaponDisplay(player)
@@ -2784,10 +2776,8 @@ local function updateWeaponDisplay(player)
     local character = player.Character
     if not character then return end
 
-    -- don't render for ourselves (avoids cluttering own screen)
     if player == localPlayer then return end
 
-    -- respects the ESP team check
     if espSettings.teamcheck and player.Team == localPlayer.Team then
         removeWeaponDisplay(player)
         return
@@ -2811,7 +2801,6 @@ local function updateWeaponDisplay(player)
     local head = character:FindFirstChild("Head")
     if not head then return end
 
-    -- respect the ESP max distance + own (shorter) weapon ESP distance
     local camera = workspace.CurrentCamera
     if not camera then return end
     local distance = (camera.CFrame.Position - head.Position).Magnitude
@@ -2821,7 +2810,6 @@ local function updateWeaponDisplay(player)
     billboard.Name = "HeldWeaponDisplay"
     billboard.Adornee = head
     billboard.Size = UDim2.fromOffset(180, 35)
-    -- sits higher up when Names ESP is on so it never overlaps the drawn-in name text
     billboard.StudsOffset = Vector3.new(0, espSettings.names and 4.5 or 3, 0)
     billboard.AlwaysOnTop = true
     billboard.Parent = character
@@ -2832,7 +2820,6 @@ local function updateWeaponDisplay(player)
     label.Text = tool.Name
     label.TextSize = 16
     label.Font = Enum.Font.GothamBold
-    -- uses the same colors as the main ESP
     label.TextColor3 = isAlly(player) and espSettings.allycolor or espSettings.namecolor
     label.TextStrokeTransparency = 0
     label.Parent = billboard
@@ -2869,7 +2856,7 @@ end
 players.PlayerAdded:Connect(watchPlayer)
 
 --==================================================
--- NO GAS CAR SPEEDHACK (V to toggle while seated in a vehicle)
+-- NO GAS CAR SPEEDHACK
 --==================================================
 
 local carFlySettings = {
@@ -2910,7 +2897,7 @@ local function getFlyVehicle()
     return model, currentSeat
 end
 
-local carFlyToggleRef = nil -- menu toggle reference (set after UI is built)
+local carFlyToggleRef = nil
 
 local function disableCarFly(notifyUser)
     carFlying = false
@@ -2927,7 +2914,6 @@ local function enableCarFly(notifyUser)
     if not model then
         library:notify("Sit in a VehicleSeat first!")
         warn("[CarFly] You must be sitting in a VehicleSeat.")
-        -- keep menu toggle in sync (turn back off)
         if library.options["carfly enabled"] then
             library.options["carfly enabled"].changeState(false)
         end
@@ -2951,11 +2937,6 @@ local function setCarFly(state)
     end
 end
 
---------------------------------------------------
--- V KEY HANDLER (single source of truth, no double-firing)
---------------------------------------------------
-
--- converts an InputObject into the same format the keybind flag stores
 local function getInputKey(input)
     if input.KeyCode ~= Enum.KeyCode.Unknown then
         return input.KeyCode
@@ -2963,36 +2944,31 @@ local function getInputKey(input)
     return input.UserInputType
 end
 
--- toggles flying on/off and keeps the menu "Enabled" toggle in sync
 local function toggleCarFly(notifyUser)
     if carFlying then
         disableCarFly(notifyUser)
-        -- turn the menu toggle off to match
         if library.options["carfly enabled"] then
             library.options["carfly enabled"].changeState(false)
         end
     else
         enableCarFly(notifyUser)
-        -- turn the menu toggle on to match (only if we actually started flying)
         if carFlying and library.options["carfly enabled"] then
             library.options["carfly enabled"].changeState(true)
         end
     end
 end
 
--- the bound key is read LIVE from library.flags so rebinding in the menu works
 inputService.InputBegan:Connect(function(input, processed)
-    if processed then return end -- don't trigger while typing in a textbox
+    if processed then return end
 
     local boundKey = library.flags["carfly key"]
     if typeof(boundKey) ~= "EnumItem" then return end
-    if boundKey == Enum.KeyCode.Unknown then return end -- nothing bound / waiting for input
+    if boundKey == Enum.KeyCode.Unknown then return end
     if getInputKey(input) ~= boundKey then return end
 
     toggleCarFly(true)
 end)
 
--- reset on respawn
 localPlayer.CharacterAdded:Connect(function()
     disableCarFly(false)
 end)
@@ -3025,7 +3001,6 @@ runService.RenderStepped:Connect(function(dt)
         return
     end
 
-    -- Mouse position in 3D world.
     local mouseRay = camera:ScreenPointToRay(
         mouse.X,
         mouse.Y
@@ -3034,7 +3009,6 @@ runService.RenderStepped:Connect(function(dt)
     local origin = mouseRay.Origin
     local direction = mouseRay.Direction.Unit
 
-    -- Put the target point far in front of the camera.
     local targetPosition =
         origin + direction * carFlySettings.maxDistance
 
@@ -3048,7 +3022,6 @@ runService.RenderStepped:Connect(function(dt)
         return
     end
 
-    -- Don't instantly teleport the vehicle.
     local moveDistance = math.min(
         carFlySettings.speed * dt,
         distance
@@ -3058,7 +3031,6 @@ runService.RenderStepped:Connect(function(dt)
         currentPosition +
         offset.Unit * moveDistance
 
-    -- Face the vehicle toward the mouse.
     local lookDirection = offset.Unit
 
     local targetCFrame = CFrame.lookAt(
@@ -3067,7 +3039,6 @@ runService.RenderStepped:Connect(function(dt)
         Vector3.yAxis
     )
 
-    -- Smooth the rotation so it doesn't violently spin.
     local rotationAlpha =
         math.clamp(carFlySettings.rotationSpeed * dt, 0, 1)
 
@@ -3100,7 +3071,6 @@ local jumpSettings = {
     infiniteJump = false
 }
 
--- store defaults so disabling restores the character's original jump
 local storedUseJumpPower = nil
 local storedJumpPower = nil
 local storedJumpHeight = nil
@@ -3110,12 +3080,10 @@ local function applyJumpToCharacter(character)
 
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then
-        -- character might not be fully loaded yet
         humanoid = character:WaitForChild("Humanoid", 5)
         if not humanoid then return end
     end
 
-    -- capture originals once (before we touch anything)
     if storedUseJumpPower == nil then
         storedUseJumpPower = humanoid.UseJumpPower
         storedJumpPower = humanoid.JumpPower
@@ -3166,15 +3134,13 @@ local function setJumpPower(value)
     end
 end
 
--- re-apply on respawn / character change
 localPlayer.CharacterAdded:Connect(function(character)
     if jumpSettings.highJumpEnabled then
-        task.wait(0.2) -- let the character finish loading
+        task.wait(0.2)
         applyJumpToCharacter(character)
     end
 end)
 
--- infinite jumps (fires on every jump request while enabled)
 inputService.JumpRequest:Connect(function()
     if not jumpSettings.infiniteJump then
         return
@@ -3199,7 +3165,6 @@ local espVisuals = visualsTab:createGroup("left", "ESP")
 local playerVisuals = visualsTab:createGroup("right", "Player")
 local worldVisuals = miscTab:createGroup("left", "World Visuals")
 
--- ESP settings go here
 espVisuals:addToggle({
     text = "Enable ESP",
     flag = "esp enabled",
@@ -3224,7 +3189,6 @@ espVisuals:addToggle({
     flag = "esp names",
     callback = function(state)
         espSettings.names = state
-        -- rebuild displays so the stacked offset gets refreshed
         if espSettings.itemesp then
             clearAllWeaponDisplays()
             for _,plr in next, players:GetPlayers() do
@@ -3349,7 +3313,6 @@ espVisuals:addColorpicker({
     end
 })
 
--- Vehicle ESP
 espVisuals:addToggle({
     text = "Vehicle ESP",
     flag = "vehicle esp",
@@ -3391,7 +3354,6 @@ espVisuals:addColorpicker({
     end
 })
 
--- Player visual toggles
 playerVisuals:addToggle({
     text = "Bullet Tracer",
     flag = "bullet tracer",
@@ -3407,7 +3369,6 @@ playerVisuals:addSlider({
     max = 50,
     value = 8,
     callback = function(value)
-        -- slider is 1-50, mapped down to beam studs (0.01 - 0.5)
         tracerConfig.widthStart = value / 100
         tracerConfig.widthEnd = tracerConfig.widthStart / 4
     end
@@ -3420,7 +3381,6 @@ playerVisuals:addSlider({
     max = 20,
     value = 1,
     callback = function(value)
-        -- slider is 1-20, mapped to seconds (0.05 - 1.0)
         tracerConfig.lifetime = value / 20
     end
 }, "s")
@@ -3477,7 +3437,6 @@ playerVisuals:addColorpicker({
     end
 })
 
--- World visuals
 worldVisuals:addToggle({
     text = "Full Bright",
     flag = "full bright",
@@ -3503,8 +3462,47 @@ worldVisuals:addList({
 })
 
 --==================================================
--- MISC TAB (no gas car speedhack + high jump)
+-- MISC TAB (hit sounds + car speedhack + high jump)
 --==================================================
+
+local soundsGroup = miscTab:createGroup("left", "Hit Sounds")
+
+soundsGroup:addToggle({
+    text = "Headshot Sounds",
+    flag = "hitsounds enabled",
+    callback = function(state)
+        hitSoundSettings.enabled = state
+    end
+})
+
+soundsGroup:addList({
+    text = "Sound Selector",
+    flag = "hitsounds sound",
+    values = (function()
+        local names = {}
+        for name in pairs(sounds) do
+            table.insert(names, name)
+        end
+        table.sort(names)
+        return names
+    end)(),
+    value = "rust headshot sound",
+    callback = function(value)
+        hitSoundSettings.selected = value
+    end
+})
+
+soundsGroup:addSlider({
+    text = "Volume",
+    flag = "hitsounds volume",
+    min = 0,
+    max = 10,
+    value = 8,
+    callback = function(value)
+        -- slider is 0-10, mapped down to 0.0 - 1.0
+        hitSoundSettings.volume = value / 10
+    end
+}, "")
 
 local carFlyGroup = miscTab:createGroup("right", "no gas car speedhack v to enable")
 
@@ -3521,7 +3519,7 @@ carFlyToggleRef = carFlyToggle
 carFlyToggle:addKeybind({
     flag = "carfly key",
     key = Enum.KeyCode.V
-}) -- note: no callback here on purpose; the InputBegan handler above does the toggling (prevents double-fire)
+})
 
 carFlyGroup:addSlider({
     text = "Speed",
@@ -3545,7 +3543,6 @@ carFlyGroup:addSlider({
     end
 }, "")
 
--- High Jump group
 local jumpGroup = miscTab:createGroup("right", "High Jump")
 
 jumpGroup:addToggle({
@@ -3585,7 +3582,6 @@ runService.RenderStepped:Connect(function()
         return
     end
 
-    -- chams: re-apply on respawn
     if chamsEnabled then
         for _,plr in next, players:GetPlayers() do
             applyChams(plr)
@@ -3593,7 +3589,6 @@ runService.RenderStepped:Connect(function()
         updateChams()
     end
 
-    -- ESP with periodic full refresh so drawings can't get stuck/glitched
     if espSettings.enabled then
         if os.clock() - lastEspRefresh > ESP_REFRESH_INTERVAL then
             forceEspRefresh()
@@ -3608,7 +3603,6 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
--- Vehicle ESP distance/render loop (separate so player ESP stays unaffected)
 runService.RenderStepped:Connect(function()
     if not vehicleESPSettings.enabled then
         return
@@ -3627,7 +3621,6 @@ runService.RenderStepped:Connect(function()
                 (root.Position - data.part.Position).Magnitude
             )
 
-            -- distance limit
             if distance > vehicleESPSettings.maxdistance then
                 data.highlight.Enabled = false
                 data.billboard.Enabled = false
@@ -3674,7 +3667,6 @@ uisettings:addTextbox({text = "Domain",flag = "menudomain"})
 uisettings:addColorpicker({text = "Domain Accent",ontop = true,flag = "domainaccent",color = Color3.new(1,1,1)})
 uisettings:addColorpicker({text = "Menu Accent",ontop = true,flag = "menuaccent",color = Color3.new(1,1,1)})
 
--- ✅ FIXED: Show Keybinds now actually hides/shows all keybind buttons
 othersettings:addToggle({
     text = "Show Keybinds",
     flag = "show keybinds",
@@ -3687,8 +3679,6 @@ othersettings:addToggle({
     end
 })
 
--- make sure the flag exists before Load is hit (keybind buttons check it at creation)
 library.flags["show keybinds"] = true
 
--- initial config list refresh
 library:refreshConfigs()
