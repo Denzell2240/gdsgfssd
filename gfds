@@ -1,4 +1,4 @@
-local inputService   = game:GetService("UserInputService")
+local inputService  = game:GetService("UserInputService")
 local runService     = game:GetService("RunService")
 local tweenService   = game:GetService("TweenService")
 local players        = game:GetService("Players")
@@ -67,7 +67,6 @@ end)
 
 local keyNames = {
     [Enum.KeyCode.LeftAlt] = 'LALT';
-    [Enum.KeyCode.RightAlt] = 'RALT';
     [Enum.KeyCode.RightAlt] = 'RALT';
     [Enum.KeyCode.LeftControl] = 'LCTRL';
     [Enum.KeyCode.RightControl] = 'RCTRL';
@@ -3158,6 +3157,114 @@ inputService.JumpRequest:Connect(function()
 end)
 
 --==================================================
+-- ZOOM (hold T to zoom, release to unzoom)
+--==================================================
+
+local zoomSettings = {
+    enabled = false,
+    zoomFOV = 30,
+    smoothing = 8,
+    storedFOV = nil,
+    zooming = false
+}
+
+local function getZoomKey()
+    local key = library.flags["zoom key"]
+    if typeof(key) == "EnumItem" and key ~= Enum.KeyCode.Unknown then
+        return key
+    end
+    return Enum.KeyCode.T
+end
+
+local function isZoomKeyDown()
+    local key = getZoomKey()
+    if key.EnumType == Enum.KeyCode then
+        return inputService:IsKeyDown(key)
+    else
+        return inputService:IsMouseButtonPressed(key)
+    end
+end
+
+local currentZoomTween = nil
+
+local function startZoom()
+    local camera = workspace.CurrentCamera
+    if not camera or zoomSettings.zooming then return end
+
+    zoomSettings.zooming = true
+    zoomSettings.storedFOV = camera.FieldOfView
+
+    if currentZoomTween then
+        currentZoomTween:Cancel()
+    end
+
+    currentZoomTween = tweenService:Create(
+        camera,
+        TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {FieldOfView = math.clamp(zoomSettings.zoomFOV, 1, 120)}
+    )
+    currentZoomTween:Play()
+end
+
+local function stopZoom()
+    local camera = workspace.CurrentCamera
+    if not zoomSettings.zooming then return end
+
+    zoomSettings.zooming = false
+
+    if currentZoomTween then
+        currentZoomTween:Cancel()
+    end
+
+    if camera and zoomSettings.storedFOV then
+        currentZoomTween = tweenService:Create(
+            camera,
+            TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            {FieldOfView = zoomSettings.storedFOV}
+        )
+        currentZoomTween:Play()
+    end
+end
+
+-- toggle the feature off -> instantly restore FOV if currently zoomed
+local function setZoomEnabled(state)
+    zoomSettings.enabled = state
+    if not state and zoomSettings.zooming then
+        stopZoom()
+    end
+end
+
+inputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if not zoomSettings.enabled then return end
+    if getZoomKey() == Enum.KeyCode.Unknown then return end
+    if input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode ~= getZoomKey() then return end
+    if input.KeyCode == Enum.KeyCode.Unknown and input.UserInputType ~= getZoomKey() and getZoomKey().EnumType ~= Enum.UserInputType then return end
+
+    if isZoomKeyDown() and not zoomSettings.zooming then
+        startZoom()
+    end
+end)
+
+inputService.InputEnded:Connect(function(input)
+    if not zoomSettings.zooming then return end
+
+    -- released while zoomed? only unzoom if the zoom key was the one released
+    if getZoomKey().EnumType == Enum.KeyCode and input.KeyCode == getZoomKey() then
+        stopZoom()
+    elseif getZoomKey().EnumType == Enum.UserInputType and input.UserInputType == getZoomKey() then
+        stopZoom()
+    end
+end)
+
+-- safety: if the key gets released while the game window is unfocused, unzoom anyway
+runService.RenderStepped:Connect(function()
+    if zoomSettings.zooming and not isZoomKeyDown() then
+        stopZoom()
+    end
+end)
+
+--==================================================
 -- VISUALS TAB
 --==================================================
 
@@ -3462,7 +3569,7 @@ worldVisuals:addList({
 })
 
 --==================================================
--- MISC TAB (hit sounds + car speedhack + high jump)
+-- MISC TAB (hit sounds + car speedhack + high jump + zoom)
 --==================================================
 
 local soundsGroup = miscTab:createGroup("left", "Hit Sounds")
@@ -3503,6 +3610,20 @@ soundsGroup:addSlider({
         hitSoundSettings.volume = value / 10
     end
 }, "")
+
+soundsGroup:addSlider({
+    text = "Volume",
+    flag = "hitsounds volume",
+    min = 0,
+    max = 10,
+    value = 8,
+    callback = function(value)
+        -- slider is 0-10, mapped down to 0.0 - 1.0
+        hitSoundSettings.volume = value / 10
+    end
+}, "")
+
+
 
 local carFlyGroup = miscTab:createGroup("right", "no gas car speedhack v to enable")
 
@@ -3571,6 +3692,39 @@ jumpGroup:addToggle({
         jumpSettings.infiniteJump = state
     end
 })
+
+--==================================================
+-- ZOOM GROUP (Misc tab)
+--==================================================
+
+local zoomGroup = miscTab:createGroup("left", "Zoom")
+
+local zoomToggle = zoomGroup:addToggle({
+    text = "Zoom (hold)",
+    flag = "zoom enabled",
+    callback = function(state)
+        setZoomEnabled(state)
+        if state then
+            library:notify("Hold T to zoom")
+        end
+    end
+})
+
+zoomToggle:addKeybind({
+    flag = "zoom key",
+    key = Enum.KeyCode.T
+})
+
+zoomGroup:addSlider({
+    text = "Zoom FOV",
+    flag = "zoom fov",
+    min = 1,
+    max = 70,
+    value = 30,
+    callback = function(value)
+        zoomSettings.zoomFOV = value
+    end
+}, "")
 
 --==================================================
 -- RENDER LOOP
@@ -3682,3 +3836,5 @@ othersettings:addToggle({
 library.flags["show keybinds"] = true
 
 library:refreshConfigs()
+
+library:notify("loaded successfully - right shift to toggle menu")
