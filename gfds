@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService      = game:GetService("SoundService")
 local Lighting          = game:GetService("Lighting")
 local Debris            = game:GetService("Debris")
+local CoreGui           = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
@@ -150,7 +151,7 @@ end)
 --==================================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ExternalVIPPUBLIC"
+ScreenGui.Name = "ExternalVIPPrivate"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 999
@@ -160,15 +161,20 @@ do
     if syn and syn.protect_gui then
         pcall(function() syn.protect_gui(ScreenGui) end)
     end
-    pcall(function() ScreenGui.Parent = game:GetService("CoreGui") parented = ScreenGui.Parent ~= nil end)
+    pcall(function() ScreenGui.Parent = CoreGui parented = ScreenGui.Parent ~= nil end)
     if not parented then
-        local ok = pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+        local ok = pcall(function() ScreenGui.Parent = CoreGui end)
         if not ok then ScreenGui.Parent = PlayerGui end
     end
 end
 
-local old = PlayerGui:FindFirstChild("ExternalVIPPrivate")
-if old and old ~= ScreenGui then old:Destroy() end
+-- destroy old copies (public + private) from CoreGui and PlayerGui
+for _, name in ipairs({"ExternalVIPPUBLIC", "ExternalVIPPrivate"}) do
+    for _, container in ipairs({CoreGui, PlayerGui}) do
+        local old = container:FindFirstChild(name)
+        if old and old ~= ScreenGui then old:Destroy() end
+    end
+end
 
 --==================================================
 -- MAIN WINDOW
@@ -213,7 +219,7 @@ Brand.Position = UDim2.new(0, 20, 0, 9)
 Brand.Size = UDim2.new(0, 300, 0, 25)
 Brand.Font = Enum.Font.GothamBold
 Brand.RichText = true
-Brand.Text = 'external<font color="#F08ED6">.vip</font> public'
+Brand.Text = 'external<font color="#F08ED6">.vip</font> private'
 Brand.TextColor3 = COLORS.Text
 Brand.TextSize = 18
 Brand.TextXAlignment = Enum.TextXAlignment.Left
@@ -224,7 +230,7 @@ Build.BackgroundTransparency = 1
 Build.Position = UDim2.new(0, 20, 0, 34)
 Build.Size = UDim2.new(0, 350, 0, 17)
 Build.Font = Enum.Font.Gotham
-Build.Text = "PUBLIC BUILD  •  RIGHTSHIFT = MENU   •external likes dick"  
+Build.Text = "PRIVATE BUILD  •  RIGHTSHIFT = MENU"
 Build.TextColor3 = COLORS.Muted
 Build.TextSize = 9
 Build.TextXAlignment = Enum.TextXAlignment.Left
@@ -236,7 +242,7 @@ Status.AnchorPoint = Vector2.new(1, 0.5)
 Status.Position = UDim2.new(1, -20, 0.5, 0)
 Status.Size = UDim2.new(0, 160, 0, 20)
 Status.Font = Enum.Font.GothamSemibold
-Status.Text = "●  PUBLIC"
+Status.Text = "●  PRIVATE"
 Status.TextColor3 = ACCENT
 Status.TextSize = 10
 Status.TextXAlignment = Enum.TextXAlignment.Right
@@ -573,12 +579,6 @@ local function addToggle(group, args)
 
     return obj
 end
-
---==================================================
--- COMPONENT: KEYBIND ROW (standalone)
---==================================================
-
--- (keybinds attach to toggles via toggle:addKeybind)
 
 --==================================================
 -- COMPONENT: SLIDER
@@ -2763,6 +2763,29 @@ end
 Players.PlayerAdded:Connect(watchPlayer)
 
 --==================================================
+-- NOCLIP
+--==================================================
+
+RunService.Stepped:Connect(function()
+    if not Flags["noclip"] then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+        end
+    end
+end)
+
+-- auto-disable noclip on respawn (prevents getting stuck in the floor)
+LocalPlayer.CharacterAdded:Connect(function()
+    if Flags["noclip"] and Options["noclip"] then
+        task.wait(0.1)
+        Options["noclip"].changeState(false)
+    end
+end)
+
+--==================================================
 -- NO GAS CAR SPEEDHACK (functional, from original)
 --==================================================
 
@@ -3492,6 +3515,20 @@ addToggle(JumpGroup, {
     end
 })
 
+local noclipToggle = addToggle(JumpGroup, {
+    text = "Noclip",
+    desc = "Walk through walls",
+    flag = "noclip"
+})
+
+noclipToggle:addKeybind({
+    flag = "noclip key",
+    key = Enum.KeyCode.N,
+    callback = function()
+        noclipToggle.set(not Flags["noclip"])
+    end
+})
+
 local ZoomGroup = createGroup(MiscPage, "Zoom")
 
 local zoomToggle = addToggle(ZoomGroup, {
@@ -3729,4 +3766,4 @@ end)
 refreshConfigList()
 notify("loaded successfully - right shift to toggle menu")
 
-print("[external.vip public] UI loaded")
+print("[external.vip private] UI loaded")
