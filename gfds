@@ -150,7 +150,7 @@ end)
 --==================================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ExternalVIPPrivate"
+ScreenGui.Name = "ExternalVIPPublic"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 999
@@ -168,7 +168,7 @@ do
 end
 
 -- destroy old copies (public + private) from CoreGui and PlayerGui
-for _, name in ipairs({"ExternalVIPPUBLIC", "ExternalVIPPrivate"}) do
+for _, name in ipairs({"ExternalVIPPUBLIC", "ExternalVIPPublic"}) do
     for _, container in ipairs({CoreGui, PlayerGui}) do
         local old = container:FindFirstChild(name)
         if old and old ~= ScreenGui then old:Destroy() end
@@ -218,7 +218,7 @@ Brand.Position = UDim2.new(0, 20, 0, 9)
 Brand.Size = UDim2.new(0, 300, 0, 25)
 Brand.Font = Enum.Font.GothamBold
 Brand.RichText = true
-Brand.Text = 'external<font color="#F08ED6">.vip</font> private'
+Brand.Text = 'external<font color="#F08ED6">.vip</font> public'
 Brand.TextColor3 = COLORS.Text
 Brand.TextSize = 18
 Brand.TextXAlignment = Enum.TextXAlignment.Left
@@ -229,7 +229,7 @@ Build.BackgroundTransparency = 1
 Build.Position = UDim2.new(0, 20, 0, 34)
 Build.Size = UDim2.new(0, 350, 0, 17)
 Build.Font = Enum.Font.Gotham
-Build.Text = "PRIVATE BUILD  •  RIGHTSHIFT = MENU"
+Build.Text = "PUBLIC BUILD  •  RIGHTSHIFT = MENU"
 Build.TextColor3 = COLORS.Muted
 Build.TextSize = 9
 Build.TextXAlignment = Enum.TextXAlignment.Left
@@ -241,7 +241,7 @@ Status.AnchorPoint = Vector2.new(1, 0.5)
 Status.Position = UDim2.new(1, -20, 0.5, 0)
 Status.Size = UDim2.new(0, 160, 0, 20)
 Status.Font = Enum.Font.GothamSemibold
-Status.Text = "●  PRIVATE"
+Status.Text = "●  PUBLIC"
 Status.TextColor3 = ACCENT
 Status.TextSize = 10
 Status.TextXAlignment = Enum.TextXAlignment.Right
@@ -3765,4 +3765,4 @@ end)
 refreshConfigList()
 notify("loaded successfully - right shift to toggle menu")
 
-print("[external.vip private] UI loaded")
+print("[external.vip public] UI loaded")
