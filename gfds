@@ -1701,14 +1701,6 @@ refreshExcludedList = function()
     local opt = Options["aimbot excluded"]
     if not opt then return end
 
-    local prevSet = {}
-    local selection = Flags["aimbot excluded"]
-    if type(selection) == "table" then
-        for _, v in ipairs(selection) do
-            prevSet[v] = true
-        end
-    end
-
     local names = {}
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer then
@@ -1718,13 +1710,6 @@ refreshExcludedList = function()
     table.sort(names)
 
     opt.refresh(names)
-
-    if names[1] then
-        opt.changeState(names[1])
-        if prevSet[names[1]] then
-            opt.changeState(names[1])
-        end
-    end
 end
 
 Players.PlayerAdded:Connect(function(plr)
@@ -1738,6 +1723,7 @@ end)
 task.defer(function()
     refreshExcludedList()
 end)
+
 
 local aimCircle = Drawing.new("Circle")
 aimCircle.Thickness = 1
