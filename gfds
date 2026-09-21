@@ -1720,13 +1720,23 @@ refreshExcludedList = function()
 
     opt.refresh(names)
 
-    if names[1] then
-        opt.changeState(names[1])
-        if prevSet[names[1]] then
-            opt.changeState(names[1])
+   refreshExcludedList = function()
+    local opt = Options["aimbot excluded"]
+    if not opt then return end
+
+    local names = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            table.insert(names, plr.Name)
         end
     end
+    table.sort(names)
+
+    -- opt.refresh() keeps any currently-selected names that still exist,
+    -- and drops names of players who left. No toggling needed.
+    opt.refresh(names)
 end
+
 
 Players.PlayerAdded:Connect(function(plr)
     task.delay(1, function() refreshExcludedList() end)
