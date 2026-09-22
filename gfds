@@ -1,7 +1,7 @@
 --// external.vip public — UI shell + all functional features
 --// RightShift = Toggle Menu
---// v4: aimbot removed, replaced with silent aim (v6 namecall hook),
---//     corner box + skeleton ESP
+--// v5: ESP removes instantly on death (Died hook + health check each frame),
+--//     hipfire silent aim (redirects all aim rays, not just center-screen ADS)
 
 --==================================================
 -- SERVICES
@@ -1474,7 +1474,7 @@ createPageHeader(MiscPage, "Misc", "Utility and movement features")
 createPageHeader(SettingsPage, "Config", "Configuration profiles and UI settings")
 
 --==================================================
--- SILENT AIM (v6 namecall hook — replaces old aimbot)
+-- SILENT AIM (namecall hook, now with hipfire support)
 --==================================================
 
 local silentAimSettings = {
@@ -1483,7 +1483,8 @@ local silentAimSettings = {
     hitbox = "Head",
     teamCheck = false,
     wallCheck = false,
-    showFov = true
+    showFov = true,
+    hipfire = true -- redirect ALL aim rays so hipfire shots also lock on
 }
 
 local saCircle
@@ -1567,8 +1568,13 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- __namecall hook: intercept the camera's ViewportPointToRay call the
--- game's shooting code makes at screen center and swap it for our cached ray.
+-- __namecall hook: intercept the camera's aim-ray calls the game's shooting
+-- code makes and swap them for our cached ray (target -> head).
+--
+-- ADS (scoped/crosshair shots) use ViewportPointToRay called with the exact
+-- screen center. Hipfire shots use other ray calls (ScreenPointToRay /
+-- ViewportPointToRay with mouse position), so when "Hipfire Silent Aim" is
+-- enabled we redirect EVERY aim-ray call while a target is locked.
 local nc = newcclosure or function(f) return f end
 
 local oldNamecall
@@ -1577,11 +1583,17 @@ oldNamecall = hookmetamethod(game, "__namecall", nc(function(self, ...)
 
     if silentAimSettings.enabled
         and cachedRay
-        and method == "ViewportPointToRay"
         and self == workspace.CurrentCamera
+        and (method == "ViewportPointToRay" or method == "ScreenPointToRay")
     then
+        -- hipfire mode: redirect everything
+        if silentAimSettings.hipfire then
+            return cachedRay
+        end
+
+        -- normal mode: only redirect exact screen-center calls (ADS)
         local x, y, depth = ...
-        if depth == 0 then
+        if method == "ViewportPointToRay" and depth == 0 then
             local vp = self.ViewportSize
             if math.abs((tonumber(x) or -1) - vp.X * 0.5) < 1
                 and math.abs((tonumber(y) or -1) - vp.Y * 0.5) < 1
@@ -1619,6 +1631,16 @@ silentAimToggle:addKeybind({
 })
 
 local SASettingsGroup = createGroup(SilentAimPage, "Silent Aim Settings")
+
+addToggle(SASettingsGroup, {
+    text = "Hipfire Silent Aim",
+    desc = "Silent aim works while hipfiring",
+    flag = "silent aim hipfire",
+    value = true,
+    callback = function(state)
+        silentAimSettings.hipfire = state
+    end
+})
 
 addDropdown(SASettingsGroup, {
     text = "Hitbox",
@@ -2315,7 +2337,7 @@ task.spawn(function()
 end)
 
 --==================================================
--- ESP SYSTEM (corner box + skeleton — old boxes removed)
+-- ESP SYSTEM (corner box + skeleton — instant removal on death)
 --==================================================
 
 local espSettings = {
@@ -2454,6 +2476,56 @@ local function hideEsp(obj)
     obj.distanceText.Visible = false
     obj.tracer.Visible = false
 end
+
+--==================================================
+-- ESP INSTANT DEATH HANDLING
+-- watches every player's Humanoid; the moment they die their
+-- drawings get deleted (no frozen box staying on screen)
+--==================================================
+
+local function watchPlayerEsp(plr)
+    if plr == LocalPlayer then return end
+
+    local function hookCharacter(char)
+        local hum = char:WaitForChild("Humanoid", 10)
+        if hum and hum:IsA("Humanoid") then
+            hum.Died:Connect(function()
+                removeEsp(plr)
+            end)
+            -- safety net in case Humanoid gets replaced / ragdoll deaths
+            hum.HealthChanged:Connect(function(health)
+                if health <= 0 then
+                    removeEsp(plr)
+                end
+            end)
+        end
+    end
+
+    if plr.Character then
+        task.spawn(hookCharacter, plr.Character)
+    end
+
+    plr.CharacterAdded:Connect(function(char)
+        hookCharacter(char)
+    end)
+
+    -- last resort: if the whole character gets removed, wipe the drawings
+    plr.CharacterRemoving:Connect(function()
+        removeEsp(plr)
+    end)
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    task.spawn(watchPlayerEsp, plr)
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    watchPlayerEsp(plr)
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    removeEsp(plr)
+end)
 
 --==================================================
 -- SCREEN BOUNDS (real bounding box from parts)
@@ -2610,14 +2682,28 @@ local function updateEspPlayer(plr, camera)
     if not espSettings.enabled or plr == LocalPlayer then return end
 
     local char = plr.Character
-    if not char then return end
+
+    -- player has no character (dead / despawned) -> nuke their drawings
+    if not char then
+        if espObjects[plr] then removeEsp(plr) end
+        return
+    end
 
     local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char.PrimaryPart
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not root or not hum or hum.Health <= 0 then return end
+
+    -- dead player -> instantly delete their ESP so nothing stays frozen
+    if not root or not hum or hum.Health <= 0 then
+        if espObjects[plr] then removeEsp(plr) end
+        return
+    end
 
     local distance = (camera.CFrame.Position - root.Position).Magnitude
-    if distance > espSettings.maxdistance then return end
+    if distance > espSettings.maxdistance then
+        local obj = espObjects[plr]
+        if obj then hideEsp(obj) end
+        return
+    end
 
     local obj = espObjects[plr]
     if not obj then
@@ -2687,10 +2773,6 @@ local function updateEspPlayer(plr, camera)
     end
 end
 
-Players.PlayerRemoving:Connect(function(plr)
-    removeEsp(plr)
-end)
-
 --==================================================
 -- WEAPON ESP (functional, from original)
 --==================================================
@@ -2734,6 +2816,13 @@ local function updateWeaponDisplay(player)
 
     local head = character:FindFirstChild("Head")
     if not head then return end
+
+    -- don't show weapon labels on dead players either
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then
+        removeWeaponDisplay(player)
+        return
+    end
 
     local camera = workspace.CurrentCamera
     if not camera then return end
@@ -3402,6 +3491,7 @@ addSlider(PlayerFXGroup, {
     value = 8,
     callback = function(value)
         tracerConfig.widthStart = value / 100
+        tracerConfig.widthStart = value / 100
         tracerConfig.widthEnd = tracerConfig.widthStart / 4
     end
 })
@@ -3455,6 +3545,7 @@ local SoundsGroup = createGroup(MiscPage, "Hit Sounds")
 
 addToggle(SoundsGroup, {
     text = "Headshot Sounds",
+    desc = "Kill people with silent aim while hipfiring",
     flag = "hitsounds enabled",
     callback = function(state)
         hitSoundSettings.enabled = state
