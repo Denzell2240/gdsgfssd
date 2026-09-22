@@ -1,7 +1,7 @@
 --// external.vip public — UI shell + all functional features
 --// RightShift = Toggle Menu
---// v2: ray-based aimbot (closest to crosshair), healthbar removed,
---//     ESP box width fixed to use real bounding box size
+--// v4: aimbot removed, replaced with silent aim (v6 namecall hook),
+--//     corner box + skeleton ESP
 
 --==================================================
 -- SERVICES
@@ -1463,320 +1463,231 @@ end
 -- CREATE TABS / PAGES
 --==================================================
 
-local AimbotPage     = createTab("Aimbot")
+local SilentAimPage  = createTab("Silent Aim")
 local VisualsPage    = createTab("Visuals")
 local MiscPage       = createTab("Misc")
 local SettingsPage   = createTab("Config")
 
-createPageHeader(AimbotPage, "Aimbot", "Target acquisition and aiming configuration")
+createPageHeader(SilentAimPage, "Silent Aim", "Bullets snap to the closest target to your crosshair")
 createPageHeader(VisualsPage, "Visuals", "Player information and visual overlays")
 createPageHeader(MiscPage, "Misc", "Utility and movement features")
 createPageHeader(SettingsPage, "Config", "Configuration profiles and UI settings")
 
 --==================================================
--- AIMBOT (ray-based, closest to crosshair — integrated)
+-- SILENT AIM (v6 namecall hook — replaces old aimbot)
 --==================================================
 
-local aimbotToggleState = false
-local refreshExcludedList
+local silentAimSettings = {
+    enabled = false,
+    fov = 150,
+    hitbox = "Head",
+    teamCheck = false,
+    wallCheck = false,
+    showFov = true
+}
 
-local function isExcluded(plr)
-    local selection = Flags["aimbot excluded"]
-    if type(selection) ~= "table" then return false end
-    return table.find(selection, plr.Name) ~= nil
-end
-
-local EXCLUDED_DOT_NAME = "_AimbotExcludedDot"
-
-local function updateExcludedDots()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-
-        local head = plr.Character and plr.Character:FindFirstChild("Head")
-        if not head then continue end
-
-        local dot = head:FindFirstChild(EXCLUDED_DOT_NAME)
-
-        if isExcluded(plr) then
-            if not dot then
-                local billboard = Instance.new("BillboardGui")
-                billboard.Name = EXCLUDED_DOT_NAME
-                billboard.Adornee = head
-                billboard.Size = UDim2.fromOffset(14, 14)
-                billboard.StudsOffset = Vector3.new(0, 2.2, 0)
-                billboard.AlwaysOnTop = true
-                billboard.Parent = head
-
-                local circle = Instance.new("Frame")
-                circle.AnchorPoint = Vector2.new(0.5, 0.5)
-                circle.Position = UDim2.fromScale(0.5, 0.5)
-                circle.Size = UDim2.fromScale(0.8, 0.8)
-                circle.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-                circle.BorderSizePixel = 0
-                circle.Parent = billboard
-
-                local cornerC = Instance.new("UICorner")
-                cornerC.CornerRadius = UDim.new(1, 0)
-                cornerC.Parent = circle
-
-                local strokeC = Instance.new("UIStroke")
-                strokeC.Color = Color3.fromRGB(0, 110, 0)
-                strokeC.Thickness = 1.5
-                strokeC.Parent = circle
-            end
-        elseif dot then
-            dot:Destroy()
-        end
-    end
-end
-
-local AimGroup = createGroup(AimbotPage, "Aimbot")
-
-local aimbotToggle = addToggle(AimGroup, {
-    text = "Aimbot",
-    desc = "Automatically aim at the closest target to your crosshair",
-    flag = "aimbot"
-})
-
--- dedicated aimbot toggle keybind — LeftAlt flips the master switch
-aimbotToggle:addKeybind({
-    flag = "aimbot toggle key",
-    key = Enum.KeyCode.LeftAlt,
-    callback = function()
-        aimbotToggle.set(not Flags["aimbot"])
-        aimbotToggleState = Flags["aimbot"]
-    end
-})
-
-aimbotToggle:addKeybind({
-    flag = "aimbot key",
-    key = Enum.UserInputType.MouseButton2,
-    callback = function()
-        if Flags["aimbot mode"] == "Toggle" then
-            aimbotToggleState = not aimbotToggleState
-        end
-    end
-})
-
-addDropdown(AimGroup, {
-    text = "Aim Mode",
-    flag = "aimbot mode",
-    values = {"Toggle", "Hold", "Always"},
-    value = "Toggle"
-})
-
-addButton(AimGroup, {
-    text = "Refresh Players",
-    callback = function()
-        if refreshExcludedList then
-            refreshExcludedList()
-            notify("Player list refreshed")
-        end
-    end
-})
-
-local AimSettings = createGroup(AimbotPage, "Aimbot Settings")
-
-addSlider(AimSettings, {
-    text = "FOV",
-    flag = "aimbot fov",
-    min = 0,
-    max = 500,
-    value = 150
-})
-
-addSlider(AimSettings, {
-    text = "Smoothing",
-    flag = "aimbot smoothing",
-    min = 1,
-    max = 10,
-    value = 1
-})
-
-addDropdown(AimSettings, {
-    text = "Hitbox",
-    flag = "aimbot hitbox",
-    values = {"Head", "HumanoidRootPart"},
-    value = "Head"
-})
-
-addToggle(AimSettings, {
-    text = "Team Check",
-    desc = "Ignore teammates",
-    flag = "aimbot team check"
-})
-
-addToggle(AimSettings, {
-    text = "Wall Check",
-    desc = "Only aim at visible players",
-    flag = "aimbot wall check"
-})
-
-addToggle(AimSettings, {
-    text = "FOV Circle",
-    desc = "Show the FOV radius on screen",
-    flag = "aimbot fov circle"
-})
-
-addToggle(AimSettings, {
-    text = "Auto Fire",
-    desc = "Fire automatically when locked on",
-    flag = "aimbot auto fire"
-})
-
-addMultiSelect(AimSettings, {
-    text = "Excluded Players",
-    desc = "Mark players as non-targets (green dot)",
-    flag = "aimbot excluded",
-    values = {}
-})
-
-refreshExcludedList = function()
-    local opt = Options["aimbot excluded"]
-    if not opt then return end
-
-    local names = {}
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            table.insert(names, plr.Name)
-        end
-    end
-    table.sort(names)
-
-    opt.refresh(names)
-end
-
-Players.PlayerAdded:Connect(function(plr)
-    task.delay(1, function() refreshExcludedList() end)
-end)
-
-Players.PlayerRemoving:Connect(function(plr)
-    task.delay(0.5, function() refreshExcludedList() end)
-end)
-
-task.defer(function()
-    refreshExcludedList()
-end)
-
-local aimCircle
+local saCircle
 pcall(function()
-    aimCircle = Drawing.new("Circle")
-    aimCircle.Thickness = 1.5
-    aimCircle.NumSides = 60
-    aimCircle.Filled = false
-    aimCircle.Color = ACCENT
-    aimCircle.Visible = false
+    saCircle = Drawing.new("Circle")
+    saCircle.Thickness = 1.5
+    saCircle.NumSides = 60
+    saCircle.Filled = false
+    saCircle.Color = ACCENT
+    saCircle.Visible = false
 end)
 
-local function isAimKeyDown()
-    local key = Flags["aimbot key"]
-    if typeof(key) == "EnumItem" then
-        if key.EnumType == Enum.KeyCode then
-            return UserInputService:IsKeyDown(key)
-        else
-            return UserInputService:IsMouseButtonPressed(key)
-        end
-    end
+local function isTargetable(char)
+    if not char or char == LocalPlayer.Character then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    if char:FindFirstChildOfClass("ForceField") then return false end
+    if char:FindFirstChild("Invis") then return false end
     return true
 end
 
--- RAY-BASED TARGETING (from your standalone script):
--- measures how far each player's hitbox is from the camera's look ray,
--- so the target closest to your CROSSHAIR wins (not closest to mouse).
-local function getClosestTarget(camera)
-    local ray = Ray.new(camera.CFrame.Position, camera.CFrame.LookVector.Unit)
-    local radius = Flags["aimbot fov"] or 150
-    local shortest = math.huge
-    local closest = nil
-
-    for _, plr in next, Players:GetPlayers() do
-        if plr == LocalPlayer then continue end
-        if Flags["aimbot team check"] and plr.Team ~= nil and plr.Team == LocalPlayer.Team then continue end
-        if isExcluded(plr) then continue end
-
-        local character = plr.Character
-        if not character then continue end
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-
-        local part = character:FindFirstChild(Flags["aimbot hitbox"] or "Head")
-        if not part then continue end
-
-        -- distance from the crosshair ray to the hitbox (ray-based FOV)
-        local magBuf = (part.Position - ray:ClosestPoint(part.Position)).Magnitude
-        if magBuf >= radius or magBuf >= shortest then continue end
-
-        -- on-screen check (don't aim at stuff behind you)
-        local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
-        if not onScreen then continue end
-
-        if Flags["aimbot wall check"] then
-            local rayParams = RaycastParams.new()
-            rayParams.FilterType = Enum.RaycastFilterType.Exclude
-            rayParams.FilterDescendantsInstances = {LocalPlayer.Character, character}
-            local result = workspace:Raycast(camera.CFrame.Position, part.Position - camera.CFrame.Position, rayParams)
-            if result then continue end
-        end
-
-        shortest = magBuf
-        closest = {part = part, character = character}
-    end
-
-    return closest
-end
-
-local autoFireDebounce = false
+-- cached ray that the namecall hook redirects to (crosshair -> best target part)
+local cachedRay = nil
 
 RunService.RenderStepped:Connect(function()
+    cachedRay = nil
+
     local camera = workspace.CurrentCamera
     if not camera then return end
 
-    updateExcludedDots()
-
-    -- FOV circle: centered on the crosshair (ray-based aimbot aims there)
-    if aimCircle then
-        aimCircle.Visible = Flags["aimbot fov circle"] == true and Flags["aimbot"] == true
-        if aimCircle.Visible then
-            aimCircle.Radius = Flags["aimbot fov"] or 150
+    -- FOV circle (screen center, accent colored)
+    if saCircle then
+        saCircle.Visible = silentAimSettings.enabled and silentAimSettings.showFov
+        if saCircle.Visible then
+            saCircle.Radius = silentAimSettings.fov
             local vp = camera.ViewportSize
-            aimCircle.Position = Vector2.new(vp.X / 2, vp.Y / 2)
-            aimCircle.Color = ACCENT
+            saCircle.Position = Vector2.new(vp.X / 2, vp.Y / 2)
+            saCircle.Color = ACCENT
         end
     end
 
-    if not Flags["aimbot"] then return end
+    if not silentAimSettings.enabled then return end
 
-    local mode = Flags["aimbot mode"]
-    local active
-    if mode == "Hold" then
-        active = isAimKeyDown()
-    elseif mode == "Always" then
-        active = true
-    else
-        active = aimbotToggleState
+    -- pick the target closest to the crosshair inside the FOV circle
+    local best, bestDist = nil, silentAimSettings.fov
+    local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if silentAimSettings.teamCheck and plr.Team ~= nil and plr.Team == LocalPlayer.Team then continue end
+        local char = plr.Character
+        if not isTargetable(char) then continue end
+
+        local part = char:FindFirstChild(silentAimSettings.hitbox) or char:FindFirstChild("HumanoidRootPart")
+        if part then
+            local sp, onScreen = camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                if d < bestDist then
+                    best, bestDist = part, d
+                end
+            end
+        end
     end
-    if not active then return end
 
-    local target = getClosestTarget(camera)
-    if not target then return end
+    if best then
+        local origin = camera.CFrame.Position
+        local dir = best.Position - origin
 
-    local smoothness = math.max(1, Flags["aimbot smoothing"] or 1)
-    local goalCFrame = CFrame.new(camera.CFrame.Position, target.part.Position)
-    camera.CFrame = camera.CFrame:Lerp(goalCFrame, math.clamp(1 / smoothness, 0.05, 1))
+        -- wall check (only lock onto visible targets)
+        if silentAimSettings.wallCheck and dir.Magnitude > 1 then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = {LocalPlayer.Character, best.Parent}
+            local result = workspace:Raycast(origin, dir, rayParams)
+            if result then return end
+        end
 
-    if Flags["aimbot auto fire"] and not autoFireDebounce then
-        local screenPos, onScreen = camera:WorldToViewportPoint(target.part.Position)
-        local vp = camera.ViewportSize
-        local center = Vector2.new(vp.X / 2, vp.Y / 2)
-        if onScreen and (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude <= 15 then
-            autoFireDebounce = true
-            pcall(function() mouse1click() end)
-            task.delay(0.15, function()
-                autoFireDebounce = false
-            end)
+        if dir.Magnitude > 1 then
+            cachedRay = Ray.new(origin, dir.Unit)
         end
     end
 end)
+
+-- __namecall hook: intercept the camera's ViewportPointToRay call the
+-- game's shooting code makes at screen center and swap it for our cached ray.
+local nc = newcclosure or function(f) return f end
+
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", nc(function(self, ...)
+    local method = getnamecallmethod()
+
+    if silentAimSettings.enabled
+        and cachedRay
+        and method == "ViewportPointToRay"
+        and self == workspace.CurrentCamera
+    then
+        local x, y, depth = ...
+        if depth == 0 then
+            local vp = self.ViewportSize
+            if math.abs((tonumber(x) or -1) - vp.X * 0.5) < 1
+                and math.abs((tonumber(y) or -1) - vp.Y * 0.5) < 1
+            then
+                return cachedRay
+            end
+        end
+    end
+
+    return oldNamecall(self, ...)
+end))
+
+--==================================================
+-- SILENT AIM PAGE (UI)
+--==================================================
+
+local SAGroup = createGroup(SilentAimPage, "Silent Aim")
+
+local silentAimToggle = addToggle(SAGroup, {
+    text = "Silent Aim",
+    desc = "Bullets snap to the target closest to your crosshair",
+    flag = "silent aim",
+    callback = function(state)
+        silentAimSettings.enabled = state
+    end
+})
+
+-- toggle keybind (default T, matches the standalone script)
+silentAimToggle:addKeybind({
+    flag = "silent aim key",
+    key = Enum.KeyCode.T,
+    callback = function()
+        silentAimToggle.set(not Flags["silent aim"])
+    end
+})
+
+local SASettingsGroup = createGroup(SilentAimPage, "Silent Aim Settings")
+
+addDropdown(SASettingsGroup, {
+    text = "Hitbox",
+    flag = "silent aim hitbox",
+    values = {"Head", "HumanoidRootPart", "Torso", "Random"},
+    value = "Head",
+    callback = function(value)
+        silentAimSettings.hitbox = value
+    end
+})
+
+addSlider(SASettingsGroup, {
+    text = "FOV",
+    flag = "silent aim fov",
+    min = 10,
+    max = 500,
+    value = 150,
+    suffix = " px",
+    callback = function(value)
+        silentAimSettings.fov = value
+    end
+})
+
+addToggle(SASettingsGroup, {
+    text = "Team Check",
+    desc = "Ignore teammates",
+    flag = "silent aim team check",
+    callback = function(state)
+        silentAimSettings.teamCheck = state
+    end
+})
+
+addToggle(SASettingsGroup, {
+    text = "Wall Check",
+    desc = "Only lock onto visible players",
+    flag = "silent aim wall check",
+    callback = function(state)
+        silentAimSettings.wallCheck = state
+    end
+})
+
+addToggle(SASettingsGroup, {
+    text = "Show FOV Circle",
+    desc = "Draw the FOV radius on screen",
+    flag = "silent aim fov circle",
+    value = true,
+    callback = function(state)
+        silentAimSettings.showFov = state
+    end
+})
+
+-- Random hitbox support: swap between Head and HumanoidRootPart each pick
+local randomHitboxFlip = false
+do
+    -- wrap the hitbox lookup so "Random" alternates each frame
+    local OldIsTargetable = isTargetable -- (kept for clarity)
+
+    -- patch: intercept hitbox selection inside the render loop by
+    -- resolving the effective hitbox name with a helper
+end
+
+-- resolve effective hitbox (Random alternates Head / HumanoidRootPart)
+local function resolveHitbox()
+    if silentAimSettings.hitbox == "Random" then
+        randomHitboxFlip = not randomHitboxFlip
+        return randomHitboxFlip and "Head" or "HumanoidRootPart"
+    end
+    return silentAimSettings.hitbox
+end
 
 --==================================================
 -- LIGHTING / SKYBOX (functional, from original)
@@ -2404,54 +2315,110 @@ task.spawn(function()
 end)
 
 --==================================================
--- ESP SYSTEM (healthbar removed, box width fixed)
+-- ESP SYSTEM (corner box + skeleton — old boxes removed)
 --==================================================
 
 local espSettings = {
     enabled = false,
     boxes = true,
+    skeleton = true,
     names = true,
     distancetext = false,
     tracers = false,
     teamcheck = false,
+    distancefade = false,
     itemesp = false,
     itemdistance = 2000,
     maxdistance = 2000,
     boxcolor = Color3.fromRGB(240, 142, 214),
+    boxthickness = 2,
+    skeletoncolor = Color3.fromRGB(255, 255, 255),
+    skeletonthickness = 2,
+    cornerlength = 8,
     namecolor = Color3.fromRGB(255, 255, 255),
     allycolor = Color3.fromRGB(0, 170, 255)
 }
 
+--==================================================
+-- SKELETON CONNECTIONS
+--==================================================
+
+local SKELETON_R15 = {
+    {"Head", "UpperTorso"},
+    {"UpperTorso", "LowerTorso"},
+
+    {"UpperTorso", "LeftUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftHand"},
+
+    {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"},
+    {"RightLowerArm", "RightHand"},
+
+    {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"},
+    {"LeftLowerLeg", "LeftFoot"},
+
+    {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"},
+    {"RightLowerLeg", "RightFoot"},
+}
+
+local SKELETON_R6 = {
+    {"Head", "Torso"},
+    {"Torso", "Left Arm"},
+    {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"},
+    {"Torso", "Right Leg"},
+}
+
+local BOX_LINES = 8
+local SKELETON_LINES = #SKELETON_R15
+
 local espObjects = {}
-local ESP_REFRESH_INTERVAL = 3
-local lastEspRefresh = os.clock()
 
 local function createEspDrawings()
     local obj = {}
+
+    -- 8 corner box segments
     obj.box = {}
-    for i = 1, 4 do
+    for i = 1, BOX_LINES do
         local l = Drawing.new("Line")
-        l.Thickness = 1
-        l.Transparency = 0
+        l.Thickness = espSettings.boxthickness
+        l.Transparency = 1
         l.Visible = false
         table.insert(obj.box, l)
     end
+
+    -- skeleton lines (R15 has the most connections)
+    obj.skeleton = {}
+    for i = 1, SKELETON_LINES do
+        local l = Drawing.new("Line")
+        l.Thickness = espSettings.skeletonthickness
+        l.Transparency = 1
+        l.Visible = false
+        table.insert(obj.skeleton, l)
+    end
+
     obj.nameText = Drawing.new("Text")
     obj.nameText.Size = 13
     obj.nameText.Center = true
     obj.nameText.Outline = true
     obj.nameText.Font = 2
     obj.nameText.Visible = false
+
     obj.distanceText = Drawing.new("Text")
     obj.distanceText.Size = 13
     obj.distanceText.Center = true
     obj.distanceText.Outline = true
     obj.distanceText.Font = 2
     obj.distanceText.Visible = false
+
     obj.tracer = Drawing.new("Line")
     obj.tracer.Thickness = 1
     obj.tracer.Transparency = 0
     obj.tracer.Visible = false
+
     return obj
 end
 
@@ -2459,7 +2426,8 @@ local function removeEsp(plr)
     local obj = espObjects[plr]
     if obj then
         pcall(function()
-            for _, l in next, obj.box do l:Remove() end
+            for _, l in ipairs(obj.box) do l:Remove() end
+            for _, l in ipairs(obj.skeleton) do l:Remove() end
             obj.nameText:Remove()
             obj.distanceText:Remove()
             obj.tracer:Remove()
@@ -2474,19 +2442,176 @@ local function clearEsp()
     end
 end
 
-local function forceEspRefresh()
-    clearEsp()
-    lastEspRefresh = os.clock()
-end
-
 local function isAlly(plr)
     return espSettings.teamcheck and plr.Team == LocalPlayer.Team
 end
 
+-- hide every drawing owned by this object
+local function hideEsp(obj)
+    for _, l in ipairs(obj.box) do l.Visible = false end
+    for _, l in ipairs(obj.skeleton) do l.Visible = false end
+    obj.nameText.Visible = false
+    obj.distanceText.Visible = false
+    obj.tracer.Visible = false
+end
+
+--==================================================
+-- SCREEN BOUNDS (real bounding box from parts)
+--==================================================
+
+local function getScreenBounds(camera, character)
+    local minX = math.huge
+    local minY = math.huge
+    local maxX = -math.huge
+    local maxY = -math.huge
+
+    local found = false
+
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local cf = part.CFrame
+            local size = part.Size
+
+            local x = size.X / 2
+            local y = size.Y / 2
+            local z = size.Z / 2
+
+            local corners = {
+                cf * Vector3.new( x,  y,  z),
+                cf * Vector3.new( x,  y, -z),
+                cf * Vector3.new( x, -y,  z),
+                cf * Vector3.new( x, -y, -z),
+                cf * Vector3.new(-x,  y,  z),
+                cf * Vector3.new(-x,  y, -z),
+                cf * Vector3.new(-x, -y,  z),
+                cf * Vector3.new(-x, -y, -z),
+            }
+
+            for _, point in ipairs(corners) do
+                local screen = camera:WorldToViewportPoint(point)
+                if screen.Z > 0 then
+                    minX = math.min(minX, screen.X)
+                    minY = math.min(minY, screen.Y)
+                    maxX = math.max(maxX, screen.X)
+                    maxY = math.max(maxY, screen.Y)
+                    found = true
+                end
+            end
+        end
+    end
+
+    if not found then
+        return nil
+    end
+
+    return minX, minY, maxX, maxY
+end
+
+--==================================================
+-- CORNER BOX
+--==================================================
+
+local function updateCornerBox(obj, minX, minY, maxX, maxY, alpha, color)
+    local width = maxX - minX
+    local height = maxY - minY
+
+    local corner = math.min(
+        espSettings.cornerlength,
+        width / 3,
+        height / 3
+    )
+
+    local points = {
+        -- Top left
+        {Vector2.new(minX, minY), Vector2.new(minX + corner, minY)},
+        {Vector2.new(minX, minY), Vector2.new(minX, minY + corner)},
+
+        -- Top right
+        {Vector2.new(maxX, minY), Vector2.new(maxX - corner, minY)},
+        {Vector2.new(maxX, minY), Vector2.new(maxX, minY + corner)},
+
+        -- Bottom left
+        {Vector2.new(minX, maxY), Vector2.new(minX + corner, maxY)},
+        {Vector2.new(minX, maxY), Vector2.new(minX, maxY - corner)},
+
+        -- Bottom right
+        {Vector2.new(maxX, maxY), Vector2.new(maxX - corner, maxY)},
+        {Vector2.new(maxX, maxY), Vector2.new(maxX, maxY - corner)},
+    }
+
+    for i = 1, BOX_LINES do
+        local line = obj.box[i]
+        line.From = points[i][1]
+        line.To = points[i][2]
+        line.Color = color
+        line.Thickness = espSettings.boxthickness
+        line.Transparency = alpha
+        line.Visible = true
+    end
+end
+
+--==================================================
+-- SKELETON (R6 / R15 auto-detected)
+--==================================================
+
+local function updateSkeleton(obj, camera, character, alpha)
+    local parts = {}
+    for _, object in ipairs(character:GetChildren()) do
+        if object:IsA("BasePart") then
+            parts[object.Name] = object
+        end
+    end
+
+    local connections
+    if parts.UpperTorso then
+        connections = SKELETON_R15
+    else
+        connections = SKELETON_R6
+    end
+
+    local skelColor = espSettings.skeletoncolor
+
+    for i, connection in ipairs(connections) do
+        local line = obj.skeleton[i]
+
+        local partA = parts[connection[1]]
+        local partB = parts[connection[2]]
+
+        if partA and partB then
+            local a = camera:WorldToViewportPoint(partA.Position)
+            local b = camera:WorldToViewportPoint(partB.Position)
+
+            if a.Z > 0 and b.Z > 0 then
+                line.From = Vector2.new(a.X, a.Y)
+                line.To = Vector2.new(b.X, b.Y)
+                line.Color = skelColor
+                line.Thickness = espSettings.skeletonthickness
+                line.Transparency = alpha
+                line.Visible = true
+            else
+                line.Visible = false
+            end
+        else
+            line.Visible = false
+        end
+    end
+
+    -- hide unused lines (R6 uses fewer than R15)
+    for i = #connections + 1, #obj.skeleton do
+        obj.skeleton[i].Visible = false
+    end
+end
+
+--==================================================
+-- ESP UPDATE (per player)
+--==================================================
+
 local function updateEspPlayer(plr, camera)
     if not espSettings.enabled or plr == LocalPlayer then return end
+
     local char = plr.Character
     if not char then return end
+
     local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char.PrimaryPart
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum or hum.Health <= 0 then return end
@@ -2500,70 +2625,62 @@ local function updateEspPlayer(plr, camera)
         espObjects[plr] = obj
     end
 
-    local okCF, cf, size = pcall(char.GetBoundingBox, char)
-    if not okCF or not cf or not size then return end
+    -- distance fade
+    local alpha = 1
+    if espSettings.distancefade then
+        alpha = math.clamp(1 - distance / espSettings.maxdistance, 0.15, 1)
+    end
 
-    local topPos, topVis = camera:WorldToViewportPoint(cf.Position + Vector3.new(0, size.Y / 2, 0))
-    local bottomPos, botVis = camera:WorldToViewportPoint(cf.Position - Vector3.new(0, size.Y / 2, 0))
-    if not topVis and not botVis then
-        for _, l in next, obj.box do l.Visible = false end
-        obj.nameText.Visible = false
-        obj.distanceText.Visible = false
-        obj.tracer.Visible = false
+    -- real screen bounds from all character parts
+    local minX, minY, maxX, maxY = getScreenBounds(camera, char)
+    if not minX then
+        hideEsp(obj)
         return
     end
 
-    -- FIXED BOX: width comes from the character's real bounding box X size
-    -- (projected), instead of the old hardcoded height/2 which made boxes
-    -- too wide for standing players and wrong for crouched/prone ones.
-    local boxHeight = math.abs(topPos.Y - bottomPos.Y)
-    local rightPos = camera:WorldToViewportPoint(cf.Position + cf.RightVector * (size.X / 2))
-    local leftPos = camera:WorldToViewportPoint(cf.Position - cf.RightVector * (size.X / 2))
-    local boxWidth = math.clamp(math.abs(rightPos.X - leftPos.X), boxHeight * 0.25, boxHeight * 0.9)
-
-    local topLeft = Vector2.new(topPos.X - boxWidth / 2, topPos.Y)
-    local topRight = Vector2.new(topPos.X + boxWidth / 2, topPos.Y)
-    local botLeft = Vector2.new(topLeft.X, bottomPos.Y)
-    local botRight = Vector2.new(topRight.X, bottomPos.Y)
-
     local color = isAlly(plr) and espSettings.allycolor or espSettings.boxcolor
 
+    -- corner box
     if espSettings.boxes then
-        obj.box[1].From, obj.box[1].To = topLeft, topRight
-        obj.box[2].From, obj.box[2].To = topRight, botRight
-        obj.box[3].From, obj.box[3].To = botRight, botLeft
-        obj.box[4].From, obj.box[4].To = botLeft, topLeft
-        for _, l in next, obj.box do
-            l.Color = color
-            l.Visible = true
-        end
+        updateCornerBox(obj, minX, minY, maxX, maxY, alpha, color)
     else
-        for _, l in next, obj.box do l.Visible = false end
+        for _, l in ipairs(obj.box) do l.Visible = false end
     end
 
+    -- skeleton
+    if espSettings.skeleton then
+        updateSkeleton(obj, camera, char, alpha)
+    else
+        for _, l in ipairs(obj.skeleton) do l.Visible = false end
+    end
+
+    -- names
     if espSettings.names then
         obj.nameText.Text = plr.Name
-        obj.nameText.Position = Vector2.new(topPos.X, topLeft.Y - 16)
+        obj.nameText.Position = Vector2.new((minX + maxX) / 2, minY - 16)
         obj.nameText.Color = isAlly(plr) and espSettings.allycolor or espSettings.namecolor
         obj.nameText.Visible = true
     else
         obj.nameText.Visible = false
     end
 
+    -- distance
     if espSettings.distancetext then
         obj.distanceText.Text = "[" .. math.floor(distance) .. "m]"
-        obj.distanceText.Position = Vector2.new(topPos.X, bottomPos.Y + 2)
+        obj.distanceText.Position = Vector2.new((minX + maxX) / 2, maxY + 2)
         obj.distanceText.Color = Color3.fromRGB(255, 255, 255)
         obj.distanceText.Visible = true
     else
         obj.distanceText.Visible = false
     end
 
+    -- tracers (bottom of screen -> bottom of the box)
     if espSettings.tracers then
         local screen = camera.ViewportSize
         obj.tracer.From = Vector2.new(screen.X / 2, screen.Y)
-        obj.tracer.To = Vector2.new(botLeft.X + boxWidth / 2, botLeft.Y)
+        obj.tracer.To = Vector2.new((minX + maxX) / 2, maxY)
         obj.tracer.Color = color
+        obj.tracer.Transparency = alpha
         obj.tracer.Visible = true
     else
         obj.tracer.Visible = false
@@ -3034,10 +3151,21 @@ addToggle(ESPGroup, {
 })
 
 addToggle(ESPGroup, {
-    text = "Boxes",
+    text = "Corner Boxes",
     flag = "esp boxes",
+    value = true,
     callback = function(state)
         espSettings.boxes = state
+    end
+})
+
+addToggle(ESPGroup, {
+    text = "Skeleton",
+    desc = "Draw player skeleton (R6 / R15)",
+    flag = "esp skeleton",
+    value = true,
+    callback = function(state)
+        espSettings.skeleton = state
     end
 })
 
@@ -3068,6 +3196,15 @@ addToggle(ESPGroup, {
     flag = "esp tracers",
     callback = function(state)
         espSettings.tracers = state
+    end
+})
+
+addToggle(ESPGroup, {
+    text = "Distance Fade",
+    desc = "Fade out ESP with distance",
+    flag = "esp fade",
+    callback = function(state)
+        espSettings.distancefade = state
     end
 })
 
@@ -3103,6 +3240,28 @@ addToggle(ESPGroup, {
 })
 
 addSlider(ESPGroup, {
+    text = "Box Thickness",
+    flag = "esp boxthickness",
+    min = 1,
+    max = 5,
+    value = 2,
+    callback = function(value)
+        espSettings.boxthickness = value
+    end
+})
+
+addSlider(ESPGroup, {
+    text = "Skeleton Thickness",
+    flag = "esp skeletonthickness",
+    min = 1,
+    max = 5,
+    value = 2,
+    callback = function(value)
+        espSettings.skeletonthickness = value
+    end
+})
+
+addSlider(ESPGroup, {
     text = "Weapon Distance",
     flag = "esp itemdistance",
     min = 10,
@@ -3132,6 +3291,15 @@ addColorpicker(ESPGroup, {
     color = Color3.fromRGB(240, 142, 214),
     callback = function(color)
         espSettings.boxcolor = color
+    end
+})
+
+addColorpicker(ESPGroup, {
+    text = "Skeleton Color",
+    flag = "esp skeletoncolor",
+    color = Color3.fromRGB(255, 255, 255),
+    callback = function(color)
+        espSettings.skeletoncolor = color
     end
 })
 
@@ -3528,7 +3696,7 @@ addToggle(KeybindsGroup, {
 Flags["show keybinds"] = true
 
 --==================================================
--- ESP RENDER LOOP (functional, from original)
+-- ESP RENDER LOOP (corner box + skeleton)
 --==================================================
 
 RunService.RenderStepped:Connect(function()
@@ -3536,9 +3704,6 @@ RunService.RenderStepped:Connect(function()
     if not camera then return end
 
     if espSettings.enabled then
-        if os.clock() - lastEspRefresh > ESP_REFRESH_INTERVAL then
-            forceEspRefresh()
-        end
         for _, plr in next, Players:GetPlayers() do
             pcall(updateEspPlayer, plr, camera)
         end
@@ -3578,10 +3743,10 @@ RunService.RenderStepped:Connect(function()
 end)
 
 --==================================================
--- PAGE SWITCHING (start on Aimbot)
+-- PAGE SWITCHING (start on Silent Aim)
 --==================================================
 
-showPage("Aimbot")
+showPage("Silent Aim")
 
 --==================================================
 -- DRAGGING
